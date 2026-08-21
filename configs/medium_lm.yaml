@@ -1,0 +1,62 @@
+# FineWeb-Edu LM, ~61.4M non-embedding params. A100 ONLY -- will not fit a T4
+# Secondary confirmation only -- the headline domain is synthetic (SPEC.md s.1).
+model:
+  d_model: 768
+  n_layers: 8
+  n_heads: 12
+  n_kv_heads: 6          # GQA 2:1, keeps the recurrent injection affordable
+  ffn_mult: 2.6667
+  vocab_size: 16384      # 16k BPE keeps the embedding table small at this scale
+  max_seq_len: 1024
+  window: 512
+  prefiller_pattern: SLSL
+  decoder_pattern: SSSS
+  sharing: shared
+  rope: true
+  rope_theta: 10000.0
+  norm_eps: 1.0e-6
+  logit_cap: 15.0
+  tie_embeddings: true
+  attn_impl: sdpa
+
+data:
+  kind: lm
+  seq_len: 1024
+  task: null
+  shard_dir: /content/drive/MyDrive/rwc/data/fineweb16k
+  tokenizer_path: /content/drive/MyDrive/rwc/data/fineweb16k/tokenizer.json
+  val_tokens: 2000000
+
+loss:
+  lam: 0.0
+  consistency: none
+  influence:
+    estimator: saliency
+    horizon_H: 512
+    refresh_every: 50
+    ema_decay: 0.9
+    detach_local: true
+
+optim:
+  lr: 1.0e-3
+  betas: [0.9, 0.95]
+  weight_decay: 0.1
+  warmup: 500
+  schedule: cosine
+  grad_clip: 1.0
+  total_steps: 12000
+  global_tokens_per_step: 262144  # 256 seqs x 1024 tokens
+  micro_batch: null
+  precision: auto
+  compile: false
+
+run:
+  name: medium_lm
+  seed: 0
+  out_dir: results
+  drive_dir: /content/drive/MyDrive/rwc
+  ckpt_every: 250
+  log_every: 10
+  eval_every: 1000
+  heartbeat_secs: 60
+  wandb: false

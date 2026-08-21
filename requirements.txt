@@ -1,0 +1,19 @@
+# Core. Plain PyTorch only -- no Lightning, no Hydra, no DeepSpeed (SPEC.md section 10).
+torch>=2.1
+numpy>=1.24
+scipy>=1.10          # spearmanr for the C1 diagnostic and the influence validity gate
+pyyaml>=6.0
+
+# Data. HuggingFace datasets/tokenizers only (SPEC.md section 1).
+datasets>=2.14
+tokenizers>=0.15
+
+# Figures + progress
+matplotlib>=3.7
+tqdm>=4.65
+
+# Tests
+pytest>=7.4
+
+# Optional, behind --wandb (default off, SPEC.md section 7):
+# wandb>=0.16
