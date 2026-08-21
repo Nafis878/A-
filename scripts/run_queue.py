@@ -149,6 +149,81 @@ def build_manifest() -> Dict[str, Any]:
     return {"version": MANIFEST_VERSION, "created": time.time(), "runs": runs}
 
 
+# ---------------------------------------------------------------------------
+# Calibration sweep
+# ---------------------------------------------------------------------------
+#
+# The first A100 batch of priority 1 finished cleanly and sat at chance in every
+# distance bucket: answer-position NLL 2.772 = ln(16) exactly, CE flat from step
+# 200 to 4000, gradient norm decaying to 0.02. The model never learned to
+# retrieve, which makes probe accuracy -- and therefore C1, C2 and C3 --
+# undefined.
+#
+# Two things were established on CPU before writing this sweep:
+#
+#   * The task IS learnable. Walking the difficulty down reaches 100% accuracy
+#     (1 pair / 2 values) and 89% (3 pairs / 16 values) in 400 steps.
+#   * Learning arrives as a phase transition, not as slow convergence. CE is
+#     strictly bimodal -- pinned at the ln(n_values) plateau, or clearly below
+#     it, never in between. At 1500 steps multi-distance arms escaped at step
+#     404 and 656; at 400 steps the same configs were still at chance.
+#
+# So the question is not "does it work" but "where is the transition at real
+# scale". This ladder starts from a configuration that should comfortably learn
+# and walks one factor at a time toward the real grid config, so the first cell
+# that fails names the binding constraint.
+#
+# Every cell uses answer-only CE. Under full-sequence CE the answer is 1 scored
+# position out of 511, so solving retrieval perfectly moves total CE by 0.0054:
+# the gradient carrying the entire task is ~0.2% of the loss and the rest is
+# irreducible filler entropy.
+
+CAL_BASE: Dict[str, Any] = {
+    "data.task": "carrier_copy",
+    "model.window": 16,
+    "model.carrier_gain_seed": 7,
+    "data.loss_on_answer_only": True,
+}
+
+# seq_len must divide global_tokens_per_step (65536), hence 256 rather than 192.
+CAL_CELLS = [
+    # id,      seq,  distances,                        distractors, steps
+    ("a_easy",   256, [64],                              0, 4_000),
+    ("b_distr",  256, [64],                              4, 4_000),
+    ("c_multiD", 256, [64, 96, 128],                     4, 4_000),
+    ("d_long",   512, [64, 128, 256, 384],               4, 4_000),
+    ("e_real",   512, [64, 96, 128, 192, 256, 384],      4, 8_000),
+    # The main grid runs `needle` at W=64, not carrier_copy at W=16, so the
+    # transition has to be located there too.
+    ("f_needle", 512, [8, 16, 32, 48, 64, 96, 128, 192, 256, 384], 4, 8_000),
+]
+
+
+def build_calibration_manifest() -> Dict[str, Any]:
+    runs: List[Dict[str, Any]] = []
+    for cell_id, seq, dists, distractors, steps in CAL_CELLS:
+        name = f"cal_{cell_id}"
+        over: Dict[str, Any] = {
+            "run.name": name,
+            "data.seq_len": seq,
+            "data.distances": dists,
+            "data.n_distractors": distractors,
+            "optim.total_steps": steps,
+            "data.loss_on_answer_only": True,
+        }
+        if cell_id == "f_needle":
+            over["data.task"] = "needle"  # W stays at tiny_synth's 64
+        else:
+            over.update(CAL_BASE)
+        runs.append({
+            "id": name, "priority": 0, "group": "calibration",
+            "config": "tiny_synth.yaml", "overrides": over,
+            "status": "pending", "run_dir": None, "claimed_at": None,
+            "worker": None, "error": None, "config_hash": None,
+        })
+    return {"version": MANIFEST_VERSION, "created": time.time(), "runs": runs}
+
+
 # Counts from SPEC.md section 8. Asserted so an edit to the grid that silently
 # drops a cell fails loudly instead of producing a quietly incomplete paper.
 EXPECTED_COUNTS = {1: 3, 2: 6, 3: 6, 4: 4, 5: 2, 6: 3, 7: 8, 8: 2, 9: 4}
@@ -316,6 +391,64 @@ def summarise(manifest: Dict[str, Any]) -> str:
     return "  ".join(f"{k}={counts.get(k, 0)}" for k in order)
 
 
+def summarise_results(manifest: Dict[str, Any], results_dir: Path) -> str:
+    """Probe accuracy against chance, plus where CE left the plateau.
+
+    Answers the only question calibration asks -- did this cell learn to
+    retrieve at all -- without needing a notebook to look at the JSON.
+    """
+    lines = [
+        f"{'run':<16} {'status':<8} {'mean/chance':>12} {'escaped':>9}  per-distance accuracy",
+        "-" * 100,
+    ]
+    for run in sorted(manifest["runs"], key=lambda r: (r["priority"], r["id"])):
+        rd = Path(run["run_dir"]) if run["run_dir"] else results_dir / run["id"]
+        result_path = rd / "result.json"
+        if not result_path.exists():
+            lines.append(f"{run['id']:<16} {run['status']:<8} {'-':>12} {'-':>9}")
+            continue
+        result = json.loads(result_path.read_text(encoding="utf-8"))
+        buckets = result.get("probe_accuracy_by_distance", {})
+        chance = 1.0 / result["config"]["data"]["n_values"]
+        # Mean over buckets, not max: at 64 samples per bucket a single bucket
+        # drifts +/- 0.04 by chance alone, which is larger than the effect.
+        mean = (
+            sum(v["acc"] for v in buckets.values()) / len(buckets) if buckets else 0.0
+        )
+        escaped = _escape_step(rd, chance)
+        per = "  ".join(f"D{d}:{v['acc']:.2f}" for d, v in buckets.items())
+        lines.append(
+            f"{run['id']:<16} {run['status']:<8} {mean / chance:>11.2f}x "
+            f"{str(escaped):>9}  {per}"
+        )
+    lines.append("")
+    lines.append(
+        "mean/chance <= ~1.2 means the cell never learned to retrieve. 'escaped' is "
+        "the step at which CE\nfirst fell clearly below the ln(n_values) plateau; "
+        "None means it never did."
+    )
+    return "\n".join(lines)
+
+
+def _escape_step(run_dir: Path, chance: float) -> Optional[int]:
+    """First step where CE drops clearly below the plateau (a phase transition)."""
+    import csv as _csv
+    import math as _math
+
+    path = run_dir / "metrics.csv"
+    if not path.exists():
+        return None
+    plateau = -_math.log(chance)
+    with path.open(encoding="utf-8") as fh:
+        for row in _csv.DictReader(fh):
+            try:
+                if float(row["ce"]) < plateau * 0.95:
+                    return int(row["step"])
+            except (ValueError, KeyError):
+                continue
+    return None
+
+
 def main(argv: Optional[List[str]] = None) -> int:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--manifest", default="results/manifest.json")
@@ -323,6 +456,14 @@ def main(argv: Optional[List[str]] = None) -> int:
     p.add_argument("--max-runs", type=int, default=None)
     p.add_argument("--init", action="store_true", help="(re)create the manifest")
     p.add_argument("--status", action="store_true", help="print status and exit")
+    p.add_argument(
+        "--calibrate",
+        action="store_true",
+        help="use the calibration ladder instead of the SPEC grid",
+    )
+    p.add_argument(
+        "--summary", action="store_true", help="print probe accuracy vs chance and exit"
+    )
     args = p.parse_args(argv)
 
     manifest_path = Path(args.manifest)
@@ -330,9 +471,14 @@ def main(argv: Optional[List[str]] = None) -> int:
     results_dir.mkdir(parents=True, exist_ok=True)
 
     if args.init or not manifest_path.exists():
-        save_manifest(manifest_path, build_manifest())
+        builder = build_calibration_manifest if args.calibrate else build_manifest
+        save_manifest(manifest_path, builder())
         print(f"[queue] wrote manifest with "
               f"{len(load_manifest(manifest_path)['runs'])} runs", flush=True)
+
+    if args.summary:
+        print(summarise_results(load_manifest(manifest_path), results_dir))
+        return 0
 
     if args.status:
         manifest = load_manifest(manifest_path)

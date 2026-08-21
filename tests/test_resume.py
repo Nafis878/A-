@@ -454,3 +454,74 @@ def test_influence_stats_reach_the_csv(tmp_path: Path) -> None:
     last = dict(zip(cols, rows[-1].split(",")))
     assert 0.0 < float(last["w_entropy_ratio"]) <= 1.0
     assert float(last["w_max_over_uniform"]) >= 1.0
+
+
+# --------------------------------------------------------------------------
+# Calibration ladder
+# --------------------------------------------------------------------------
+
+
+def test_calibration_cells_are_valid_and_distinct() -> None:
+    """The ladder exists because the first A100 batch sat at chance everywhere."""
+    q = _queue()
+    manifest = q.build_calibration_manifest()
+    assert len(manifest["runs"]) == len(q.CAL_CELLS)
+    hashes = {}
+    for run in manifest["runs"]:
+        cfg = load_config(
+            q.CONFIGS / run["config"], overrides=run["overrides"], cuda_available=True
+        )
+        assert cfg.config_hash not in hashes, f"{run['id']} duplicates {hashes[cfg.config_hash]}"
+        hashes[cfg.config_hash] = run["id"]
+        assert run["priority"] == 0, "calibration must outrank the science grid"
+        # The whole point: concentrate the gradient on the retrieval position.
+        assert cfg.data.loss_on_answer_only
+        assert cfg.optim.global_tokens_per_step % cfg.data.seq_len == 0
+
+
+def test_calibration_ladder_increases_in_difficulty() -> None:
+    """Cells must walk toward the real config, so the first failure localises it."""
+    q = _queue()
+    sizes = [(seq, len(d), distr) for _, seq, d, distr, _ in q.CAL_CELLS]
+    assert sizes[0] == (256, 1, 0), "the first rung should be the easiest"
+    assert sizes[-1][1] == 10, "the last rung should be the full needle distance grid"
+    assert [s[0] for s in sizes] == sorted(s[0] for s in sizes), "seq_len must not decrease"
+
+
+def test_summary_reports_chance_relative_accuracy(tmp_path: Path) -> None:
+    """A run at chance must read as ~1.0x and 'never escaped', not as a number."""
+    q = _queue()
+    manifest = q.build_calibration_manifest()
+    manifest["runs"] = manifest["runs"][:1]
+    run = manifest["runs"][0]
+    run["status"] = "done"
+    rd = tmp_path / run["id"]
+    rd.mkdir(parents=True)
+    run["run_dir"] = str(rd)
+
+    cfg = load_config(q.CONFIGS / run["config"], overrides=run["overrides"], cuda_available=True)
+    (rd / "result.json").write_text(json.dumps({
+        "config": cfg.to_dict(),
+        "probe_accuracy_by_distance": {"64": {"acc": 1.0 / 16, "nll": 2.77, "n": 64}},
+    }), encoding="utf-8")
+    (rd / "metrics.csv").write_text("step,ce\n1,2.80\n2,2.78\n", encoding="utf-8")
+
+    out = q.summarise_results(manifest, tmp_path)
+    assert "1.00x" in out
+    assert "None" in out, "a run that never escaped the plateau must say so"
+
+    # And a run that did learn reads clearly differently.
+    (rd / "metrics.csv").write_text("step,ce\n1,2.80\n2,1.10\n", encoding="utf-8")
+    (rd / "result.json").write_text(json.dumps({
+        "config": cfg.to_dict(),
+        "probe_accuracy_by_distance": {"64": {"acc": 0.80, "nll": 0.7, "n": 64}},
+    }), encoding="utf-8")
+    out = q.summarise_results(manifest, tmp_path)
+    assert "12.80x" in out
+    assert "         2" in out, "escape step should be reported"
+
+
+def test_summary_handles_runs_with_no_results_yet(tmp_path: Path) -> None:
+    q = _queue()
+    out = q.summarise_results(q.build_calibration_manifest(), tmp_path)
+    assert out.count("pending") == len(q.CAL_CELLS)
