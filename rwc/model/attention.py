@@ -153,10 +153,16 @@ class SlidingKVCache:
     """Bounded KV cache of size W for recurrent inference (Eq. 10).
 
     Entries are kept in chronological order and the oldest is shifted out, which
-    costs an O(W) copy per step. A ring buffer would avoid the copy, but the
-    window it returns would be out of order; attention is permutation-invariant
-    over keys so that is *correct*, just harder to read and to debug against the
-    parallel mask. Correctness first (SPEC.md section 10).
+    costs an O(W) copy per step. Two choices worth naming:
+
+    * A ring buffer would avoid the copy, but the window it returns would be out
+      of order; attention is permutation-invariant over keys so that is
+      *correct*, just harder to read and to debug against the parallel mask.
+    * Appends are out-of-place (``torch.cat``) rather than in-place writes into
+      a preallocated buffer. In-place would be faster, but read-influence
+      Estimator A rolls the decoder forward with the autograd graph retained,
+      and an in-place write into a tensor the graph still needs raises at
+      backward. Correctness first (SPEC.md section 10).
     """
 
     def __init__(
@@ -170,23 +176,23 @@ class SlidingKVCache:
         dtype: torch.dtype,
     ) -> None:
         self.window = window
-        self.n_filled = 0
-        shape = (batch, n_kv_heads, window, d_head)
-        self.k = torch.zeros(shape, device=device, dtype=dtype)
-        self.v = torch.zeros(shape, device=device, dtype=dtype)
+        self._empty = torch.zeros(
+            (batch, n_kv_heads, 0, d_head), device=device, dtype=dtype
+        )
+        self.k = self._empty
+        self.v = self._empty
+
+    @property
+    def n_filled(self) -> int:
+        return self.k.shape[2]
 
     def append(self, k_t: Tensor, v_t: Tensor) -> Tuple[Tensor, Tensor]:
         """Push one step's (B, Hkv, 1, d_head) K/V and return the valid window."""
-        if self.n_filled < self.window:
-            self.k[:, :, self.n_filled] = k_t[:, :, 0]
-            self.v[:, :, self.n_filled] = v_t[:, :, 0]
-            self.n_filled += 1
-        else:
-            self.k = torch.cat([self.k[:, :, 1:], k_t], dim=2)
-            self.v = torch.cat([self.v[:, :, 1:], v_t], dim=2)
-        return self.k[:, :, : self.n_filled], self.v[:, :, : self.n_filled]
+        keep = slice(None) if self.n_filled < self.window else slice(1, None)
+        self.k = torch.cat([self.k[:, :, keep], k_t], dim=2)
+        self.v = torch.cat([self.v[:, :, keep], v_t], dim=2)
+        return self.k, self.v
 
     def reset(self) -> None:
-        self.n_filled = 0
-        self.k.zero_()
-        self.v.zero_()
+        self.k = self._empty
+        self.v = self._empty

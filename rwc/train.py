@@ -36,6 +36,7 @@ from torch import Tensor, nn
 from .config import Config, ConfigError, load_config
 from .data.synthetic import ProbeBatch, SyntheticGenerator
 from .evaluate import probe_accuracy
+from .influence import InfluenceEMA, grad_influence, saliency_influence
 from .losses import cross_entropy
 from .model.baselines import full_attention_baseline, swa_baseline
 from .model.maglev import MaglevModel
@@ -51,6 +52,14 @@ CSV_COLUMNS = [
     "grad_norm",
     "tokens",
     "elapsed_s",
+    # Logged every step so a collapse of w is visible early: entropy_ratio ~1
+    # means RWC has degenerated into the uniform L2 it is meant to improve on,
+    # and ~0 means it has spiked onto one dimension. Both look fine in the loss.
+    "w_mean",
+    "w_std",
+    "w_max",
+    "w_entropy_ratio",
+    "w_max_over_uniform",
 ]
 
 
@@ -167,6 +176,11 @@ class StepMetrics:
     grad_norm: float
     tokens: int
     elapsed_s: float
+    w_mean: float = float("nan")
+    w_std: float = float("nan")
+    w_max: float = float("nan")
+    w_entropy_ratio: float = float("nan")
+    w_max_over_uniform: float = float("nan")
 
 
 class Trainer:
@@ -196,6 +210,11 @@ class Trainer:
         )
         self.scaler = torch.amp.GradScaler("cuda", enabled=self.use_scaler)
         self.data = self._build_data()
+        self.influence = (
+            InfluenceEMA(cfg.loss.influence, cfg.model.d_model, self.device)
+            if cfg.loss.uses_influence
+            else None
+        )
 
         self.step = 0
         self.history: List[StepMetrics] = []
@@ -253,6 +272,8 @@ class Trainer:
         for group in self.opt.param_groups:
             group["lr"] = lr
 
+        self._maybe_refresh_influence()
+
         self.opt.zero_grad(set_to_none=True)
         ce_total = 0.0
         for micro in range(self.accum):
@@ -282,9 +303,38 @@ class Trainer:
             grad_norm=grad_norm,
             tokens=self.step * self.cfg.optim.global_tokens_per_step,
             elapsed_s=self.elapsed,
+            **(self.influence.stats() if self.influence is not None else {}),
         )
         self.history.append(metrics)
         return metrics
+
+    def _maybe_refresh_influence(self) -> None:
+        """Recompute read-influence on a slow EMA (SPEC.md section 5).
+
+        Refreshing every step would cost a whole extra pass; the EMA makes the
+        amortised cost negligible while keeping the weights current.
+        """
+        if self.influence is None or not self.influence.should_refresh(self.step):
+            return
+        batch = self._micro_batch(self.step, 0)
+        tokens = batch.tokens.to(self.device)
+        cfg = self.cfg.loss.influence
+        self.model.eval()
+        try:
+            if cfg.estimator == "saliency":
+                w = saliency_influence(self.model, tokens, eps=cfg.eps)
+            else:
+                w = grad_influence(
+                    self.model,
+                    tokens,
+                    batch.targets.to(self.device),
+                    horizon_H=cfg.horizon_H,
+                    detach_local=cfg.detach_local,
+                    eps=cfg.eps,
+                )
+        finally:
+            self.model.train()
+        self.influence.update(w)
 
     @property
     def elapsed(self) -> float:
@@ -411,6 +461,7 @@ class Trainer:
             "scaler": self.scaler.state_dict(),
             "elapsed_s": self.elapsed,
             "data": self.data.state_dict() if hasattr(self.data, "state_dict") else {},
+            "influence": self.influence.state_dict() if self.influence else None,
             "rng": {
                 "torch": torch.get_rng_state(),
                 "cuda": torch.cuda.get_rng_state_all() if torch.cuda.is_available() else [],
@@ -435,6 +486,8 @@ class Trainer:
         self._t0 = time.time()
         if hasattr(self.data, "load_state_dict"):
             self.data.load_state_dict(state.get("data", {}))
+        if self.influence is not None and state.get("influence"):
+            self.influence.load_state_dict(state["influence"])
 
         rng = state["rng"]
         torch.set_rng_state(rng["torch"])

@@ -31,14 +31,28 @@ per distance bucket and never averaged into one number.
 | Milestone | State |
 |---|---|
 | M1 — skeleton, configs, validated dataclass config | **done** |
-| M2 — attention, blocks, Maglev prefiller/decoder, baselines | pending |
-| M3 — synthetic data, resumable trainer, run queue | pending |
-| M4 — read-influence estimators + ground-truth validity gate | pending |
+| M2 — attention, blocks, Maglev prefiller/decoder, baselines | **done** |
+| M3 — synthetic data, resumable trainer, run queue | **done** |
+| M4 — read-influence estimators + ground-truth validity gate | **done** |
 | M5 — losses and the C1 decorrelation curve | pending |
 | M6 — full grid and figures | pending |
 
-Test files for unbuilt milestones exist and `pytest.skip` with the milestone
-named, so the suite is green *and* honest about what is not yet covered.
+`rwc/losses.py::consistency_loss`, `rwc/evaluate.py::bits_per_byte`,
+`rwc/analysis.py`, `scripts/make_figures.py` and the FineWeb-Edu pipeline in
+`rwc/data/lm.py` raise `NotImplementedError` naming their milestone. Everything
+else is built and tested: `pytest tests/ -q` is 133 passed, 0 skipped.
+
+### Verification numbers as built
+
+| Gate | Result |
+|---|---|
+| Parallel vs recurrent decoder, fp64 | max abs deviation **1.1e-16 … 3.3e-16**; `m` identical to 0.0 |
+| Parallel vs recurrent decoder, fp32 | max abs deviation **1.5e-07 … 2.4e-07** |
+| SDPA vs math attention backends | **0.0** exactly |
+| Resume vs uninterrupted, 20 steps | max abs Δloss **0.000e+00** (in-process and across a fresh process) |
+| Influence A vs known read structure | Spearman ρ **+0.9987** (threshold 0.7); live carriers only +0.9529; precision@k **1.000** |
+| Influence B vs A | Spearman ρ **+0.9926** (threshold 0.6); live carriers only +0.7235 |
+| Parameter estimate vs built model | exact for all three configs and both sharing modes |
 
 ## Layout
 
@@ -131,7 +145,7 @@ here. Each entry states what was chosen and why.
 10. **`compile: false` in every shipped config**, per SPEC section 7: compile
     time is punishing on Colab.
 
-### M2–M6 (decided, not yet implemented)
+### M2–M4
 
 11. **Estimator A runs as a truncated recurrent rollout, not in parallel mode.**
     In parallel teacher-forced mode the memory chain is broken (memory input is
@@ -155,3 +169,58 @@ here. Each entry states what was chosen and why.
     under different attention masks (`SLSL` vs `SSSS`), with the recurrent
     injection modules and per-layer residual-scaling parameters exclusive to the
     decoder path.
+
+16. **Delayed-recall's distance bound is `D > L·(W-1)`, not `D > W`.** The SPEC
+    describes the fact as "provably unreachable through local sliding-window
+    attention" at `D > W`, which is the single-layer statement. With `L` stacked
+    sliding layers information propagates `L·(W-1)` positions, and a test in
+    `tests/test_recurrence_equivalence.py` pins that bound empirically. The
+    stricter condition is enforced at config load (`ModelConfig.local_reach`);
+    using the looser one would have let local attention solve part of the task.
+    For `tiny_synth` (L=4, W=64) the bound is 252, not 64, so the delayed-recall
+    runs shrink the window to 16 to keep a usable distance axis.
+
+17. **The gates read the *normalised* sublayer input as `a_t`,** not the raw
+    residual stream. Eq. 7 says "incoming residual"; with a pre-norm block the
+    raw residual grows with depth and `2·sigmoid(G a_t)` saturates to 0 or 2,
+    killing the gate's gradient. The normalised input is what every other
+    projection in the sublayer consumes.
+
+18. **Eq. 6's RMSNorm on `k_rec` is computed per head over `d_head`,** with a
+    learnable gain of size `d_kv` (one per key dimension). The equation does not
+    name an axis; per-head is standard QK-norm practice and keeps one head's
+    scale from being set by another's.
+
+19. **The prefiller `Q` gets no auxiliary CE of its own.** It is trained purely
+    by gradient flowing back through `mem_in` from the decoder's CE, plus the
+    consistency term. Adding an auxiliary head would be a hyperparameter the
+    SPEC does not mention.
+
+20. **The KV cache appends out-of-place (`torch.cat`).** In-place writes into a
+    preallocated buffer would be faster, but Estimator A rolls the decoder
+    forward with the autograd graph retained and an in-place write into a tensor
+    the graph still needs raises at backward.
+
+21. **`normalise` clamps the denominator rather than adding epsilon.** Gradient
+    magnitudes in Estimator A are often ~1e-7, comparable to eps itself, and
+    `w / (sum + eps)` then shrinks every weight by several percent in a way that
+    depends on gradient scale — an error that rides along in every RWC weight
+    without ever failing a test.
+
+22. **Influence anchors are chosen from scoring positions, not by position.**
+    Under an answer-only loss almost every horizon window is entirely ignored,
+    `L_CE` over it is undefined, and the estimator would return zeros — which
+    reads exactly like "this memory is never used". Anchors with nothing to
+    score are dropped, and if none remain the call raises rather than returning
+    an all-zero vector.
+
+23. **`data.loss_on_answer_only` (default `False`).** Full-sequence CE matches
+    "CE" in SPEC section 5 and is what the grid runs use. Filler positions are
+    unpredictable noise, so answer-only converges far faster and is what the
+    short CPU gate tests use.
+
+24. **Priority 9's scale trend uses tiny/medium LM widths.** The SPEC's table
+    lists `tiny/small/medium × {Maglev, RWC}` as 4 runs, but `small` is already
+    covered by priority 8 — and a test confirmed the cells collided by config
+    hash exactly. Priority 9 now supplies the other two widths, so the trend has
+    three real points and no manifest cell is wasted.

@@ -406,3 +406,51 @@ def test_failed_cell_is_marked_not_silently_skipped(tmp_path: Path) -> None:
     q.work(path, tmp_path, max_runs=1)
     entry = q.load_manifest(path)["runs"][0]
     assert entry["status"] == "failed" and entry["error"]
+
+
+def test_influence_ema_survives_a_resume(tmp_path: Path) -> None:
+    """The EMA is training state too; dropping it would silently reset w."""
+    over = {
+        "loss.consistency": "rwc",
+        "loss.lam": 1.0,
+        "loss.influence.refresh_every": 2,
+        "loss.influence.estimator": "saliency",
+    }
+    a = Trainer(tiny_config(tmp_path / "ema", **over), device=torch.device("cpu"))
+    assert a.influence is not None
+    a.run(max_steps=SPLIT, quiet=True)
+    assert a.influence.n_updates > 0, "influence was never refreshed"
+
+    b = Trainer(tiny_config(tmp_path / "ema", **over), device=torch.device("cpu"))
+    b.maybe_resume()
+    torch.testing.assert_close(a.influence.value, b.influence.value)
+    assert b.influence.n_updates == a.influence.n_updates
+
+    # And the resumed trace still matches a clean run.
+    clean = Trainer(tiny_config(tmp_path / "ema_clean", **over), device=torch.device("cpu"))
+    clean.run(quiet=True)
+    b.run(quiet=True)
+    combined = losses(a) + losses(b)
+    worst = max(abs(x - y) for x, y in zip(losses(clean), combined))
+    print(f"\n[resume+rwc] max |dloss| over {TOTAL} steps: {worst:.3e}")
+    assert worst == 0.0
+
+
+def test_influence_stats_reach_the_csv(tmp_path: Path) -> None:
+    """A collapse of w must be visible in the log, not only in a debugger."""
+    t = Trainer(
+        tiny_config(
+            tmp_path / "stats",
+            **{"loss.consistency": "rwc", "loss.lam": 1.0,
+               "loss.influence.refresh_every": 1},
+        ),
+        device=torch.device("cpu"),
+    )
+    t.run(max_steps=3, quiet=True)
+    header, *rows = (t.run_dir / "metrics.csv").read_text(encoding="utf-8").strip().splitlines()
+    cols = header.split(",")
+    for name in ("w_mean", "w_std", "w_max", "w_entropy_ratio", "w_max_over_uniform"):
+        assert name in cols
+    last = dict(zip(cols, rows[-1].split(",")))
+    assert 0.0 < float(last["w_entropy_ratio"]) <= 1.0
+    assert float(last["w_max_over_uniform"]) >= 1.0
