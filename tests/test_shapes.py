@@ -160,15 +160,32 @@ def test_invalid_config_is_rejected(raw: Dict[str, Any], needle: str) -> None:
     assert needle in str(exc.value), f"unexpected message: {exc.value}"
 
 
-def test_delayed_recall_rejects_distance_inside_window() -> None:
+def test_local_reach_is_the_stacked_bound_not_the_single_layer_one() -> None:
+    """L sliding layers compose to L*(W-1), not W (README assumption 16)."""
+    m = ModelConfig(n_layers=4, window=64, decoder_pattern="SSSS")
+    assert m.local_reach == 4 * 63
+    assert ModelConfig(n_layers=1, window=64, decoder_pattern="S").local_reach == 63
+
+
+def test_delayed_recall_rejects_distance_inside_stacked_local_reach() -> None:
     """The task's whole point is a fact local attention provably cannot reach."""
-    raw = _mutated(data__task="delayed_recall")  # tiny_synth has distances < W=64
+    # tiny_synth is L=4, W=64, so the stacked reach is 252 -- far beyond W.
+    raw = _mutated(data__task="delayed_recall", data__distances=[96, 128, 192, 384])
     with pytest.raises(ConfigError) as exc:
         _cuda_free(raw)
-    assert "outside the window" in str(exc.value)
+    assert "L*(W-1)=252" in str(exc.value)
 
-    ok = _mutated(data__task="delayed_recall", data__distances=[96, 128, 192, 384])
-    _cuda_free(ok)
+    # Either push the distances past the stacked reach ...
+    _cuda_free(_mutated(data__task="delayed_recall", data__distances=[256, 320, 448]))
+    # ... or shrink the window, which is what the delayed-recall runs do so the
+    # distance axis still spans several multiples of W.
+    _cuda_free(
+        _mutated(
+            data__task="delayed_recall",
+            model__window=16,
+            data__distances=[64, 96, 128, 192, 256, 384],
+        )
+    )
 
 
 def test_fp16_requires_cuda() -> None:
@@ -266,3 +283,171 @@ def test_roundtrip_through_dict() -> None:
     cfg = load_config(CONFIG_DIR / "small_lm.yaml", cuda_available=False)
     again = config_from_dict(cfg.to_dict(), cuda_available=False)
     assert again.config_hash == cfg.config_hash
+
+
+# --------------------------------------------------------------------------
+# M3: synthetic probe generation
+# --------------------------------------------------------------------------
+
+
+def _gen(task: str = "needle", **over):
+    import torch  # noqa: F401  (imported here so M1 tests stay torch-free)
+
+    from rwc.data.synthetic import SyntheticGenerator
+
+    cfg = _cuda_free(_mutated(data__task=task, **over))
+    return SyntheticGenerator(cfg.data, cfg.model, seed=0)
+
+
+def test_probe_batch_shapes_and_dtypes() -> None:
+    g = _gen()
+    b = g.batch(step=0, batch_size=8)
+    t = g.seq_len
+    assert b.tokens.shape == (8, t) and b.targets.shape == (8, t)
+    assert b.answer_idx.shape == (8,) and b.distance.shape == (8,)
+    assert b.tokens.max().item() < g.vocab.size
+    assert b.tokens.min().item() >= 0
+
+
+@pytest.mark.parametrize("task", ["needle", "two_hop"])
+def test_answer_target_is_the_retrieved_token(task: str) -> None:
+    """The label at answer_idx must be the value the query actually asks for."""
+    g = _gen(task)
+    b = g.batch(step=1, batch_size=16)
+    for i in range(16):
+        idx = int(b.answer_idx[i])
+        answer = int(b.targets[i, idx])
+        assert answer == int(b.tokens[i, idx + 1])
+        assert g.vocab.value_lo <= answer < g.vocab.filler_lo, "answer is not a value"
+        assert int(b.tokens[i, g.query_pos]) == g.vocab.QUERY
+
+
+def test_needle_is_planted_at_the_stated_distance() -> None:
+    g = _gen("needle")
+    b = g.batch(step=2, batch_size=16)
+    for i in range(16):
+        d = int(b.distance[i])
+        p = g.query_pos - d
+        queried_key = int(b.tokens[i, g.query_pos + 1])
+        assert int(b.tokens[i, p]) == queried_key, "needle key not at distance D"
+        assert int(b.tokens[i, p + 1]) == int(b.tokens[i, g.query_pos + 2])
+
+
+def test_queried_key_appears_exactly_once_before_the_query() -> None:
+    """Distractors must not duplicate the needle key, or the task is ambiguous."""
+    g = _gen("needle")
+    b = g.batch(step=3, batch_size=16)
+    for i in range(16):
+        key = int(b.tokens[i, g.query_pos + 1])
+        before = b.tokens[i, : g.query_pos]
+        assert int((before == key).sum()) == 1
+
+
+def test_distractor_pairs_are_present() -> None:
+    """Without distractors the task collapses to 'copy the only value token'."""
+    g = _gen("needle")
+    b = g.batch(step=4, batch_size=8)
+    v = g.vocab
+    for i in range(8):
+        before = b.tokens[i, : g.query_pos]
+        n_keys = int(((before >= v.key_lo) & (before < v.value_lo)).sum())
+        assert n_keys >= 2, "no distractor keys were planted"
+
+
+def test_two_hop_chains_through_an_intermediate() -> None:
+    g = _gen("two_hop")
+    b = g.batch(step=5, batch_size=16)
+    v = g.vocab
+    for i in range(16):
+        d1 = int(b.distance[i])
+        p1 = g.query_pos - d1
+        a = int(b.tokens[i, g.query_pos + 1])
+        assert int(b.tokens[i, p1]) == a, "first hop not at the stated distance"
+        mid = int(b.tokens[i, p1 + 1])
+        assert v.key_lo <= mid < v.value_lo, "intermediate is not a key token"
+        # The second hop B -> C must exist somewhere before the query.
+        rest = b.tokens[i, p1 + 2 : g.query_pos]
+        hits = (rest == mid).nonzero()
+        assert len(hits) >= 1, "intermediate never re-appears; the chain is broken"
+        j = int(hits[0]) + p1 + 2
+        assert int(b.tokens[i, j + 1]) == int(b.tokens[i, g.query_pos + 2])
+
+
+def test_generation_is_deterministic_in_seed_and_step() -> None:
+    """This is what makes the dataloader position a single integer."""
+    import torch
+
+    a, b = _gen(), _gen()
+    assert torch.equal(a.batch(7, 8).tokens, b.batch(7, 8).tokens)
+    assert not torch.equal(a.batch(7, 8).tokens, a.batch(8, 8).tokens)
+
+    from rwc.data.synthetic import SyntheticGenerator
+
+    cfg = _cuda_free(_base_dict())
+    other_seed = SyntheticGenerator(cfg.data, cfg.model, seed=1)
+    assert not torch.equal(a.batch(7, 8).tokens, other_seed.batch(7, 8).tokens)
+
+
+def test_every_distance_bucket_is_represented() -> None:
+    """Buckets must be covered evenly; i.i.d. sampling would leave holes."""
+    g = _gen()
+    b = g.batch(step=0, batch_size=len(g.distances) * 3)
+    counts = {d: int((b.distance == d).sum()) for d in g.distances}
+    assert set(counts) == set(g.distances)
+    assert min(counts.values()) == max(counts.values()) == 3
+
+
+def test_answer_only_loss_mask_selects_one_position() -> None:
+    g = _gen(data__loss_on_answer_only=True)
+    b = g.batch(step=0, batch_size=8)
+    assert int(b.loss_mask.sum()) == 8
+    for i in range(8):
+        assert bool(b.loss_mask[i, int(b.answer_idx[i])])
+    assert int((b.targets != -100).sum()) == 8
+
+
+def test_full_sequence_loss_mask_is_the_default() -> None:
+    g = _gen()
+    b = g.batch(step=0, batch_size=4)
+    assert int(b.loss_mask.sum()) == 4 * (g.seq_len - 1)
+
+
+def test_eval_batches_are_pure_per_distance() -> None:
+    g = _gen()
+    batches = g.eval_batches(batch_size=16, n_per_distance=16)
+    assert len(batches) == len(g.distances)
+    for batch, d in zip(batches, g.distances):
+        assert set(batch.distance.tolist()) == {d}
+
+
+def test_delayed_recall_generator_rejects_reachable_distances() -> None:
+    from rwc.data.synthetic import SyntheticGenerator
+
+    cfg = _cuda_free(
+        _mutated(
+            data__task="delayed_recall", model__window=16, data__distances=[64, 128]
+        )
+    )
+    SyntheticGenerator(cfg.data, cfg.model, seed=0)  # 64 > 4*15 = 60, fine
+
+    import dataclasses
+
+    bad = dataclasses.replace(cfg.data, distances=[32, 64])
+    with pytest.raises(ConfigError):
+        SyntheticGenerator(bad, cfg.model, seed=0)
+
+
+def test_carrier_copy_generates_delayed_recall_sequences() -> None:
+    import torch
+
+    from rwc.data.synthetic import SyntheticGenerator
+
+    over = dict(model__window=16, data__distances=[64, 128])
+    a = SyntheticGenerator(*_task_pair("carrier_copy", over), seed=0)
+    b = SyntheticGenerator(*_task_pair("delayed_recall", over), seed=0)
+    assert torch.equal(a.batch(0, 4).tokens, b.batch(0, 4).tokens)
+
+
+def _task_pair(task: str, over: Dict[str, Any]):
+    cfg = _cuda_free(_mutated(data__task=task, **over))
+    return cfg.data, cfg.model

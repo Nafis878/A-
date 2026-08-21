@@ -66,6 +66,10 @@ SYNTHETIC_TASKS = ("needle", "two_hop", "delayed_recall", "carrier_copy")
 class ModelConfig:
     """Transformer geometry plus the Maglev prefiller/decoder coupling."""
 
+    # "maglev" is the model under test; "swa"/"full" are the priority-6
+    # baselines and have no prefiller or recurrent memory.
+    kind: Literal["maglev", "swa", "full"] = "maglev"
+
     d_model: int = 256
     n_layers: int = 4
     n_heads: int = 4
@@ -115,6 +119,17 @@ class ModelConfig:
         raw = self.ffn_mult * self.d_model
         return int(math.ceil(raw / 64) * 64)
 
+    @property
+    def local_reach(self) -> int:
+        """How far back the *stacked* sliding layers can carry information.
+
+        One sliding layer reaches W-1 positions; L of them compose to L*(W-1).
+        The SPEC states delayed-recall's condition as ``D > W``, which is the
+        single-layer statement; this is the multi-layer one (README assum. 16).
+        """
+        n_sliding = self.layer_kinds("decoder").count("S")
+        return n_sliding * (self.window - 1)
+
     def layer_kinds(self, which: Literal["prefiller", "decoder"]) -> List[str]:
         """Expand a pattern string to exactly n_layers entries of 'S' or 'L'."""
         pattern = (
@@ -156,6 +171,8 @@ class ModelConfig:
         return {"embedding": emb, "non_embedding": non_emb, "total": emb + non_emb}
 
     def validate(self) -> None:
+        if self.kind not in ("maglev", "swa", "full"):
+            raise ConfigError(f"unknown model.kind {self.kind!r}")
         if self.d_model <= 0 or self.n_layers <= 0 or self.n_heads <= 0:
             raise ConfigError("d_model, n_layers and n_heads must all be positive")
         if self.d_model % self.n_heads != 0:
@@ -229,6 +246,11 @@ class DataConfig:
     n_keys: int = 16
     n_values: int = 16
     n_filler: int = 16
+    n_distractors: int = 4
+    # Full-sequence CE by default, matching "CE" in SPEC.md section 5. Filler
+    # positions are unpredictable noise, so answer-only is far faster to learn
+    # and is what the short CPU gate tests use.
+    loss_on_answer_only: bool = False
 
     # -- lm --
     shard_dir: Optional[str] = None
@@ -264,15 +286,25 @@ class DataConfig:
             # The point of delayed_recall is that the fact is *provably*
             # unreachable by local attention (SPEC.md section 6), so a distance
             # inside the window would silently weaken the task.
-            if self.task == "delayed_recall":
-                short = [d for d in self.distances if d <= model.window]
+            if self.task in ("delayed_recall", "carrier_copy"):
+                reach = model.local_reach
+                short = [d for d in self.distances if d <= reach]
                 if short:
                     raise ConfigError(
-                        f"delayed_recall distances {short} are <= window="
-                        f"{model.window}; the fact must be outside the window"
+                        f"delayed_recall distances {short} are within the stacked "
+                        f"local reach L*(W-1)={reach}; the fact must be outside "
+                        "the window on every layer, not just one"
                     )
             if min(self.n_keys, self.n_values, self.n_filler) <= 0:
                 raise ConfigError("n_keys, n_values and n_filler must be positive")
+            if self.n_distractors < 0:
+                raise ConfigError("n_distractors must be non-negative")
+            needed = 4 + self.n_keys + self.n_values + self.n_filler
+            if needed > model.vocab_size:
+                raise ConfigError(
+                    f"synthetic alphabet needs {needed} token ids but "
+                    f"model.vocab_size={model.vocab_size}"
+                )
 
         elif self.kind == "lm":
             if self.shard_dir is None:

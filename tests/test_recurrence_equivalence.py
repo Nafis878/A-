@@ -131,8 +131,8 @@ def test_parallel_matches_recurrent(
     dev_m = (m_par - rec.m).abs().max().item()
     scale = logits_par.abs().max().item()
     print(
-        f"\n[{dtype} {sharing} rope={rope}] max|Δlogits|={dev_logits:.3e} "
-        f"max|Δm|={dev_m:.3e} (logit scale {scale:.3f})"
+        f"\n[{dtype} {sharing} rope={rope}] max|dlogits|={dev_logits:.3e} "
+        f"max|dm|={dev_m:.3e} (logit scale {scale:.3f})"
     )
 
     tol = 1e-10 if dtype == torch.float64 else 2e-4
@@ -153,7 +153,7 @@ def test_recurrent_rollout_is_self_consistent() -> None:
         )
 
     dev = (logits_par - rec.logits).abs().max().item()
-    print(f"\n[self-consistent rollout] max|Δlogits|={dev:.3e}")
+    print(f"\n[self-consistent rollout] max|dlogits|={dev:.3e}")
     assert dev < 1e-10
     torch.testing.assert_close(m_par, rec.m, atol=1e-10, rtol=0)
 
@@ -269,7 +269,7 @@ def test_sdpa_and_math_backends_agree() -> None:
         a, _, _ = model.forward_decoder(tokens, mem_in, impl="sdpa")
         b, _, _ = model.forward_decoder(tokens, mem_in, impl="math")
     dev = (a - b).abs().max().item()
-    print(f"\n[sdpa vs math] max|Δlogits|={dev:.3e}")
+    print(f"\n[sdpa vs math] max|dlogits|={dev:.3e}")
     assert dev < 1e-10
 
 
