@@ -150,7 +150,7 @@ def build_model(cfg: Config) -> nn.Module:
 
 
 def forward_logits(model: nn.Module, tokens: Tensor):
-    """One interface over Maglev and the baselines.
+    """One interface over Maglev and the baselines, for *training*.
 
     Returns ``(logits, m, m_prime)``; the baselines have no prefiller so
     ``m_prime`` is None and the consistency term is inapplicable to them.
@@ -160,6 +160,24 @@ def forward_logits(model: nn.Module, tokens: Tensor):
         return out.logits, out.m, out.m_prime
     logits, h = model(tokens)
     return logits, h, None
+
+
+def deployed_logits(model: nn.Module, tokens: Tensor) -> Tensor:
+    """Logits from the model as actually *deployed* (Eq. 10).
+
+    The prefiller Q is discarded and P runs recurrently on its own ``m_{t-1}``.
+    This is not the same function as ``forward_logits``: there, Q has full
+    causal attention over the whole sequence and hands the decoder a memory that
+    already contains the answer, so probe accuracy saturates near 1.0 at every
+    retrieval distance and the distance axis carries no signal at all. Measuring
+    the deployed path is what makes the C3 slope observable.
+
+    The baselines have no prefiller and no memory, so their training forward
+    already *is* the deployed model.
+    """
+    if isinstance(model, MaglevModel):
+        return model.forward_recurrent(tokens).logits
+    return model(tokens)[0]
 
 
 # --------------------------------------------------------------------------
@@ -380,23 +398,45 @@ class Trainer:
             "steps": self.step,
             "wall_clock_s": self.elapsed,
             "final_ce": self.history[-1].ce if self.history else None,
-            "probe_accuracy_by_distance": self.evaluate(),
+            # Headline: the deployed model (Eq. 10). The parallel figure is kept
+            # alongside it purely as a diagnostic -- a large gap between the two
+            # means the memory chain is not carrying what the prefiller wrote,
+            # which is precisely what the consistency loss is meant to fix.
+            "probe_accuracy_by_distance": self.evaluate(mode="deployed"),
+            "probe_accuracy_parallel": self.evaluate(mode="parallel"),
         }
 
-    def evaluate(self, *, n_per_distance: int = 64) -> Dict[str, Dict[str, float]]:
+    def evaluate(
+        self, *, n_per_distance: int = 64, mode: str = "deployed"
+    ) -> Dict[str, Dict[str, float]]:
+        """Probe accuracy per distance bucket.
+
+        ``mode="deployed"`` runs Eq. 10 -- Q discarded, P recurrent on its own
+        memory -- and is the headline metric. ``mode="parallel"`` keeps the
+        prefiller and is a diagnostic only: it saturates near 1.0 at every
+        distance, because Q's full attention hands the decoder the answer.
+        """
         if self.cfg.data.kind != "synthetic":
             return {}
+        if mode not in ("deployed", "parallel"):
+            raise ValueError(f"unknown evaluate mode {mode!r}")
+        forward = (
+            (lambda tokens: deployed_logits(self.model, tokens))
+            if mode == "deployed"
+            else (lambda tokens: forward_logits(self.model, tokens)[0])
+        )
         self.model.eval()
         try:
+            # Eval holds no gradients, so it is not bound by micro_batch --
+            # which is sized for the backward pass and can be very small. Wide
+            # batches matter here because the deployed path walks the sequence
+            # one step at a time.
             batches = self.data.eval_batches(
-                batch_size=min(self.micro_batch, n_per_distance),
+                batch_size=min(n_per_distance, max(self.micro_batch, 64)),
                 n_per_distance=n_per_distance,
             )
-            return probe_accuracy(
-                lambda tokens: forward_logits(self.model, tokens)[0],
-                batches,
-                device=self.device,
-            )
+            with torch.no_grad():
+                return probe_accuracy(forward, batches, device=self.device)
         finally:
             self.model.train()
 

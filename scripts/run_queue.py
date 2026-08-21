@@ -42,6 +42,13 @@ CONFIGS = Path(__file__).resolve().parents[1] / "configs"
 SYNTH_BASE: Dict[str, Any] = {
     "data.task": "needle",
     "data.distances": [8, 16, 32, 48, 64, 96, 128, 192, 256, 384],
+    # Confirmed by the calibration ladder. Under full-sequence CE the answer is
+    # 1 scored position out of 511, so the gradient carrying the whole task is
+    # ~0.2% of the loss and the model never leaves the ln(n_values) plateau --
+    # all three of the first A100 runs sat at chance for 4000 steps. With
+    # answer-only CE every calibration cell escaped (steps 58-864) and reached
+    # 0.88-1.00 accuracy.
+    "data.loss_on_answer_only": True,
 }
 
 # carrier_copy needs every distance past the stacked local reach, so the window
@@ -51,6 +58,7 @@ CARRIER_BASE: Dict[str, Any] = {
     "model.window": 16,
     "model.carrier_gain_seed": 7,
     "data.distances": [64, 96, 128, 192, 256, 384],
+    "data.loss_on_answer_only": True,
 }
 
 LAMBDAS = (0.1, 0.3, 1.0)

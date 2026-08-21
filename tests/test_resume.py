@@ -525,3 +525,89 @@ def test_summary_handles_runs_with_no_results_yet(tmp_path: Path) -> None:
     q = _queue()
     out = q.summarise_results(q.build_calibration_manifest(), tmp_path)
     assert out.count("pending") == len(q.CAL_CELLS)
+
+
+# --------------------------------------------------------------------------
+# Deployed vs parallel evaluation
+# --------------------------------------------------------------------------
+
+
+def test_deployed_and_parallel_paths_are_different_measurements(tmp_path: Path) -> None:
+    """Probe accuracy must be measured on the model as deployed (Eq. 10).
+
+    With the prefiller present, Q has full causal attention over the whole
+    sequence and hands the decoder a memory that already contains the answer,
+    so accuracy saturates at every retrieval distance and the distance axis --
+    the entire C3 result -- carries no signal. On the A100 calibration the two
+    differed by 0.969 (parallel) vs 0.212 (deployed) on the same checkpoint.
+    """
+    from rwc.train import deployed_logits, forward_logits
+
+    t = Trainer(tiny_config(tmp_path / "d"), device=torch.device("cpu"))
+    t.run(max_steps=3, quiet=True)
+    batch = t.data.batch(step=0, batch_size=4)
+    with torch.no_grad():
+        par = forward_logits(t.model, batch.tokens)[0]
+        dep = deployed_logits(t.model, batch.tokens)
+    assert par.shape == dep.shape
+    assert not torch.allclose(par, dep), (
+        "deployed and parallel paths agree; the prefiller is not being discarded"
+    )
+
+
+def test_result_json_reports_both_and_headlines_the_deployed_one(tmp_path: Path) -> None:
+    t = Trainer(tiny_config(tmp_path / "d"), device=torch.device("cpu"))
+    t.run(max_steps=3, quiet=True)
+    r = t.result()
+    assert "probe_accuracy_by_distance" in r
+    assert "probe_accuracy_parallel" in r
+    assert set(r["probe_accuracy_by_distance"]) == set(r["probe_accuracy_parallel"])
+    # The headline key is the deployed measurement, so summarise_results and any
+    # figure reading it get Eq. 10 rather than the diagnostic.
+    dep = t.evaluate(n_per_distance=8, mode="deployed")
+    assert set(dep) == set(r["probe_accuracy_by_distance"])
+
+
+def test_deployed_evaluation_matches_a_manual_recurrent_rollout(tmp_path: Path) -> None:
+    """Pin the deployed path to forward_recurrent, not to some other forward."""
+    t = Trainer(tiny_config(tmp_path / "d"), device=torch.device("cpu"))
+    t.run(max_steps=2, quiet=True)
+    t.model.eval()
+    batch = t.data.batch(step=0, batch_size=4)
+    with torch.no_grad():
+        from rwc.train import deployed_logits
+
+        torch.testing.assert_close(
+            deployed_logits(t.model, batch.tokens),
+            t.model.forward_recurrent(batch.tokens).logits,
+        )
+
+
+def test_baselines_have_no_separate_deployed_path(tmp_path: Path) -> None:
+    """SWA/full have no prefiller, so training forward already is deployment."""
+    from rwc.train import deployed_logits, forward_logits
+
+    t = Trainer(
+        tiny_config(tmp_path / "b", **{"model.kind": "swa"}), device=torch.device("cpu")
+    )
+    batch = t.data.batch(step=0, batch_size=4)
+    with torch.no_grad():
+        torch.testing.assert_close(
+            deployed_logits(t.model, batch.tokens),
+            forward_logits(t.model, batch.tokens)[0],
+        )
+
+
+def test_grid_uses_answer_only_loss(tmp_path: Path) -> None:
+    """Confirmed by the calibration ladder; full-sequence CE never escaped."""
+    q = _queue()
+    for run in q.build_manifest()["runs"]:
+        cfg = load_config(
+            q.CONFIGS / run["config"], overrides=run["overrides"], cuda_available=True
+        )
+        if cfg.data.kind == "synthetic":
+            assert cfg.data.loss_on_answer_only, f"{run['id']} still uses full-seq CE"
+        else:
+            assert not cfg.data.loss_on_answer_only, (
+                f"{run['id']} is an LM run; full-sequence CE is correct there"
+            )
