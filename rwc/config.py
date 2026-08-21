@@ -143,9 +143,11 @@ class ModelConfig:
         n_blocks = self.n_layers if self.sharing == "shared" else 2 * self.n_layers
         non_emb = n_blocks * per_block
         non_emb += self.n_layers * per_injection
-        non_emb += d  # final norm
         if self.sharing == "shared":
+            non_emb += d  # one final norm, used by both paths
             non_emb += 2 * self.n_layers  # decoder-path residual scales (2 per block)
+        else:
+            non_emb += 2 * d  # an independent final norm per path
 
         emb = self.vocab_size * d
         if not self.tie_embeddings:
