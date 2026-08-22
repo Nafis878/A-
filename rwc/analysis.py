@@ -26,7 +26,8 @@ Two subtleties, both of which silently flatten the curve if ignored:
 
 from __future__ import annotations
 
-from typing import Dict, List, Optional, Sequence
+import math
+from typing import Dict, List, NamedTuple, Optional, Sequence, Tuple
 
 import torch
 from torch import Tensor
@@ -46,6 +47,9 @@ __all__ = [
     "c1_curve",
     "memory_spectrum",
     "full_sequence_targets",
+    "wilson_interval",
+    "paired_slope_test",
+    "SlopeResult",
 ]
 
 IGNORE_INDEX = -100
@@ -197,3 +201,151 @@ def _slope(xs: Sequence[float], ys: Sequence[float]) -> float:
     if denom == 0:
         return float("nan")
     return sum((x - mx) * (y - my) for x, y in pairs) / denom
+
+
+# --------------------------------------------------------------------------
+# Statistics for C3
+# --------------------------------------------------------------------------
+#
+# C3 is a claim about a *slope*: RWC's advantage over uniform L2 should be near
+# zero at short range and grow with retrieval distance. A flat advantage would
+# mean RWC is a generic regulariser, which the SPEC says would weaken the paper.
+# So the quantity to test is the slope of (RWC - uniform) against distance, and
+# the unit of independence is the SEED, not the distance bucket -- the six
+# buckets within one run share a model and are emphatically not independent
+# samples of anything.
+
+
+def wilson_interval(k: int, n: int, z: float = 1.96) -> Tuple[float, float]:
+    """Wilson score interval for a binomial proportion.
+
+    Used rather than the normal approximation because probe accuracies here sit
+    near 0.06 with n of a few hundred, where the normal interval runs below zero
+    and badly understates the uncertainty.
+    """
+    if n <= 0:
+        return (float("nan"), float("nan"))
+    p = k / n
+    denom = 1.0 + z * z / n
+    centre = (p + z * z / (2 * n)) / denom
+    half = z * math.sqrt(p * (1 - p) / n + z * z / (4 * n * n)) / denom
+    return (max(0.0, centre - half), min(1.0, centre + half))
+
+
+class SlopeResult(NamedTuple):
+    slope_mean: float          # mean per-seed slope of (treat - control) vs log2 distance
+    ci_low: float
+    ci_high: float
+    p_value: float             # two-sided, permutation test on the treat/control label
+    per_seed_slopes: List[float]
+    mean_delta: float          # average advantage across all distances
+    n_seeds: int
+
+    @property
+    def min_achievable_p(self) -> float:
+        """The smallest p this design can produce, whatever the effect size.
+
+        The permutation flips one sign per seed, so there are 2**n_seeds
+        assignments and a two-sided p can never fall below 2/2**n_seeds. With
+        5 seeds that floor is 0.0625 -- above 0.05 -- so a 5-seed run CANNOT
+        report a significant slope no matter how large the effect. Six seeds
+        reach 0.031, eight reach 0.0078. Surfaced here so an underpowered
+        design is visible in the output instead of being mistaken for a null.
+        """
+        return 2.0 / (2 ** self.n_seeds)
+
+    @property
+    def underpowered(self) -> bool:
+        return self.min_achievable_p >= 0.05
+
+    @property
+    def significant(self) -> bool:
+        return self.p_value < 0.05
+
+    def verdict(self) -> str:
+        if self.n_seeds < 3:
+            return "TOO FEW SEEDS to test"
+        if self.underpowered:
+            return (f"UNDERPOWERED: {self.n_seeds} seeds floor p at "
+                    f"{self.min_achievable_p:.3f}; cannot reach 0.05")
+        if not self.significant:
+            return "NOT SIGNIFICANT: no evidence the advantage varies with distance"
+        return ("GROWS with distance" if self.slope_mean > 0
+                else "SHRINKS with distance")
+
+
+def paired_slope_test(
+    distances: Sequence[float],
+    control: Dict[int, Sequence[float]],
+    treat: Dict[int, Sequence[float]],
+    *,
+    n_permutations: int = 20000,
+    seed: int = 0,
+    log_x: bool = True,
+) -> SlopeResult:
+    """Test whether ``treat - control`` trends with distance across seeds.
+
+    ``control`` and ``treat`` map seed -> accuracy at each distance, in the same
+    order as ``distances``. Runs are paired by seed, which removes the large
+    seed-to-seed variance in whether a run escapes the learning plateau at all.
+
+    The p-value is a permutation test: under the null that the two arms are
+    exchangeable, flipping the label within a seed should not change the slope.
+    That is preferred to a t-test here because a handful of seeds gives the
+    t-distribution very little to work with, and because the per-seed slopes are
+    not obviously normal.
+
+    ``log_x`` regresses against log2(distance); the probe grid is geometric, so
+    a linear-in-distance fit would let the largest bucket dominate the estimate.
+    """
+    import random as _random
+
+    seeds = sorted(set(control) & set(treat))
+    if len(seeds) != len(set(control)) or len(seeds) != len(set(treat)):
+        raise ValueError("control and treat must cover the same seeds")
+    xs = [math.log2(d) for d in distances] if log_x else [float(d) for d in distances]
+
+    def slope_for(deltas: Sequence[float]) -> float:
+        return _slope(xs, deltas)
+
+    per_seed = []
+    for s in seeds:
+        c, t = control[s], treat[s]
+        if len(c) != len(xs) or len(t) != len(xs):
+            raise ValueError(f"seed {s}: expected {len(xs)} distances")
+        per_seed.append(slope_for([ti - ci for ti, ci in zip(t, c)]))
+
+    observed = sum(per_seed) / len(per_seed)
+    deltas_all = [
+        ti - ci for s in seeds for ti, ci in zip(treat[s], control[s])
+    ]
+    mean_delta = sum(deltas_all) / len(deltas_all)
+
+    rng = _random.Random(seed)
+    n_extreme = 0
+    for _ in range(n_permutations):
+        acc = 0.0
+        for s in seeds:
+            sign = 1.0 if rng.random() < 0.5 else -1.0
+            d = [sign * (ti - ci) for ti, ci in zip(treat[s], control[s])]
+            acc += slope_for(d)
+        if abs(acc / len(seeds)) >= abs(observed):
+            n_extreme += 1
+    p = (n_extreme + 1) / (n_permutations + 1)
+
+    lo, hi = _bootstrap_ci(per_seed, seed=seed)
+    return SlopeResult(observed, lo, hi, p, per_seed, mean_delta, len(seeds))
+
+
+def _bootstrap_ci(values: Sequence[float], *, seed: int = 0, n: int = 20000):
+    """Percentile bootstrap CI of the mean, resampling seeds."""
+    import random as _random
+
+    if len(values) < 2:
+        return (float("nan"), float("nan"))
+    rng = _random.Random(seed + 1)
+    k = len(values)
+    means = sorted(
+        sum(values[rng.randrange(k)] for _ in range(k)) / k for _ in range(n)
+    )
+    return (means[int(0.025 * n)], means[int(0.975 * n)])

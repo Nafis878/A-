@@ -93,6 +93,7 @@ def consistency_loss(
     kind: str,
     weights: Optional[Tensor] = None,
     mask: Optional[Tensor] = None,
+    detach_target: bool = False,
 ) -> Tensor:
     """The consistency penalty, *before* multiplication by lambda.
 
@@ -109,7 +110,10 @@ def consistency_loss(
     if kind == "none":
         return m.new_zeros(())
 
-    diff = m - m_prime
+    # With detach_target the prefiller is a fixed teacher for this term and the
+    # decoder chases it; without it, the two are pulled toward each other and a
+    # large lambda can be satisfied by degrading the teacher instead.
+    diff = m - (m_prime.detach() if detach_target else m_prime)
     d = diff.shape[-1]
 
     if kind == "uniform":

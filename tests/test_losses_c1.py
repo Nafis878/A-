@@ -303,3 +303,119 @@ def test_baselines_reject_a_consistency_loss(kind: str) -> None:
         overrides={"model.kind": kind},
         cuda_available=False,
     )
+
+
+# --------------------------------------------------------------------------
+# C3 statistics
+# --------------------------------------------------------------------------
+
+from rwc.analysis import paired_slope_test, wilson_interval  # noqa: E402
+
+DIST = [16, 24, 32, 48, 64, 96]
+
+
+def _arms(n_seeds, control_fn, treat_fn):
+    return (
+        {s: [control_fn(s, i) for i in range(len(DIST))] for s in range(n_seeds)},
+        {s: [treat_fn(s, i) for i in range(len(DIST))] for s in range(n_seeds)},
+    )
+
+
+def test_wilson_interval_stays_inside_zero_one() -> None:
+    """The normal approximation runs below zero at these accuracies; Wilson must not."""
+    lo, hi = wilson_interval(0, 64)
+    assert lo == 0.0 and 0.0 < hi < 0.10
+    lo, hi = wilson_interval(64, 64)
+    assert hi == 1.0 and lo > 0.9
+    lo, hi = wilson_interval(4, 64)
+    assert lo < 4 / 64 < hi
+
+
+def test_wilson_narrows_with_more_samples() -> None:
+    small = wilson_interval(10, 100)
+    large = wilson_interval(100, 1000)
+    assert (large[1] - large[0]) < (small[1] - small[0])
+
+
+def test_identical_arms_give_zero_slope_and_p_one() -> None:
+    c, t = _arms(8, lambda s, i: 0.1, lambda s, i: 0.1)
+    r = paired_slope_test(DIST, c, t, n_permutations=2000)
+    assert r.slope_mean == pytest.approx(0.0)
+    assert r.p_value == pytest.approx(1.0)
+    assert not r.significant
+
+
+def test_a_flat_advantage_is_not_a_growing_one() -> None:
+    """The distinction C3 turns on: a constant gain means RWC is a regulariser."""
+    c, t = _arms(8, lambda s, i: 0.1, lambda s, i: 0.2)
+    r = paired_slope_test(DIST, c, t, n_permutations=2000)
+    assert r.mean_delta == pytest.approx(0.1)  # there IS an advantage
+    assert r.slope_mean == pytest.approx(0.0)  # but it does not grow
+    assert not r.significant
+    assert "NOT SIGNIFICANT" in r.verdict()
+
+
+def test_a_growing_advantage_is_detected() -> None:
+    c, t = _arms(8, lambda s, i: 0.1, lambda s, i: 0.1 + 0.05 * i)
+    r = paired_slope_test(DIST, c, t, n_permutations=4000)
+    assert r.slope_mean > 0
+    assert r.significant
+    assert r.verdict() == "GROWS with distance"
+    assert r.ci_low > 0
+
+
+def test_a_shrinking_advantage_is_detected() -> None:
+    c, t = _arms(8, lambda s, i: 0.1, lambda s, i: 0.4 - 0.05 * i)
+    r = paired_slope_test(DIST, c, t, n_permutations=4000)
+    assert r.slope_mean < 0
+    assert r.verdict() == "SHRINKS with distance"
+
+
+def test_five_seeds_cannot_reach_significance() -> None:
+    """The permutation floor is 2/2**n_seeds; at 5 seeds that is above 0.05.
+
+    Without surfacing this, an underpowered design reports p=0.0625 and reads
+    as a null result when it is really 'this test could never have said yes'.
+    """
+    c, t = _arms(5, lambda s, i: 0.1, lambda s, i: 0.1 + 0.5 * i)
+    r = paired_slope_test(DIST, c, t, n_permutations=4000)
+    assert r.underpowered
+    assert r.min_achievable_p == pytest.approx(0.0625)
+    assert not r.significant
+    assert "UNDERPOWERED" in r.verdict()
+
+    c8, t8 = _arms(8, lambda s, i: 0.1, lambda s, i: 0.1 + 0.5 * i)
+    r8 = paired_slope_test(DIST, c8, t8, n_permutations=4000)
+    assert not r8.underpowered and r8.significant
+
+
+def test_seed_noise_does_not_manufacture_a_slope() -> None:
+    """Pure noise, paired by seed, must not come out significant."""
+    import random
+
+    rng = random.Random(0)
+    c, t = _arms(8, lambda s, i: rng.random() * 0.2, lambda s, i: rng.random() * 0.2)
+    r = paired_slope_test(DIST, c, t, n_permutations=4000)
+    assert not r.significant, f"noise produced p={r.p_value:.4f}"
+
+
+def test_pairing_is_by_seed_and_mismatches_are_rejected() -> None:
+    c, t = _arms(4, lambda s, i: 0.1, lambda s, i: 0.2)
+    del t[3]
+    with pytest.raises(ValueError, match="same seeds"):
+        paired_slope_test(DIST, c, t, n_permutations=100)
+
+
+def test_wrong_number_of_distances_is_rejected() -> None:
+    c, t = _arms(4, lambda s, i: 0.1, lambda s, i: 0.2)
+    t[0] = [0.1, 0.2]
+    with pytest.raises(ValueError, match="expected"):
+        paired_slope_test(DIST, c, t, n_permutations=100)
+
+
+def test_log_axis_is_the_default_and_changes_the_slope() -> None:
+    """The probe grid is geometric; a linear fit lets the last bucket dominate."""
+    c, t = _arms(8, lambda s, i: 0.1, lambda s, i: 0.1 + 0.05 * i)
+    log = paired_slope_test(DIST, c, t, n_permutations=500)
+    lin = paired_slope_test(DIST, c, t, n_permutations=500, log_x=False)
+    assert log.slope_mean != pytest.approx(lin.slope_mean)

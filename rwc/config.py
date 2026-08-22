@@ -353,6 +353,14 @@ class LossConfig:
         "none", "uniform", "rwc", "mask_topk", "mask_bottomk", "mask_randomk"
     ] = "none"
     mask_k_pct: Optional[float] = None
+    # Stop-gradient on m' inside the consistency term only (CE still trains the
+    # prefiller). Eq. 5 does not specify this, and it matters: with the pull
+    # symmetric, the cheapest way to satisfy ||m - m'|| -> 0 at high lambda is
+    # for the *teacher* to abandon the long-range content the decoder cannot
+    # reproduce. Measured on the first headline batch: at lambda 0.1 the
+    # prefiller solved the memory-only buckets at 0.97 while the decoder got
+    # 0.16; at lambda 1.0 both sat at 0.109. False reproduces Maglev as written.
+    detach_target: bool = False
     influence: InfluenceConfig = field(default_factory=InfluenceConfig)
 
     def validate(self, model: ModelConfig) -> None:

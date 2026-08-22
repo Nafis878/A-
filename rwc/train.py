@@ -355,7 +355,10 @@ class Trainer:
             weights = self.influence.value.detach()
         elif kind in MASK_KINDS:
             mask = self._mask_for_step()
-        return consistency_loss(m, m_prime, kind=kind, weights=weights, mask=mask)
+        return consistency_loss(
+            m, m_prime, kind=kind, weights=weights, mask=mask,
+            detach_target=self.cfg.loss.detach_target,
+        )
 
     def _mask_for_step(self) -> Tensor:
         """Top-k / bottom-k track the EMA; random-k is drawn once and kept."""
