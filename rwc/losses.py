@@ -22,6 +22,7 @@ of dimensions" and is noted rather than corrected.
 
 from __future__ import annotations
 
+import math
 from typing import Optional
 
 import torch
@@ -33,6 +34,7 @@ __all__ = [
     "cross_entropy",
     "consistency_loss",
     "influence_mask",
+    "propagation_penalty",
     "MASK_KINDS",
 ]
 
@@ -139,3 +141,50 @@ def consistency_loss(
     # which would let one position's error dominate the whole batch.
     per_position = scaled.float().pow(2).sum(dim=-1).sqrt()
     return per_position.mean() / (d**0.5)
+
+
+def propagation_penalty(
+    step_fn,
+    mem_in: Tensor,
+    positions: Tensor,
+    *,
+    target_gain: float = 1.0,
+    generator: Optional[torch.Generator] = None,
+) -> Tensor:
+    """Keep the memory recurrence from being switched off.
+
+    Measured failure this exists to prevent: the consistency loss drives
+    ``rho(dm_t/dm_{t-1})`` from 0.728 at lambda=0 to ~0.01 at lambda=0.03 --
+    below its value at random initialisation (~0.10). Memory is still *read*
+    (zeroing it moves logits by 6-13) but nothing is *written forward*, so at
+    deployment ``m_t`` depends only on local context and nothing survives past
+    the window.
+
+    The penalty is on the log-gain, so overshoot and undershoot cost the same
+    in relative terms and the term cannot be gamed by inflating the memory
+    scale. It targets a gain rather than merely a floor because an expansive
+    recurrence (gain > 1) compounds error instead: from
+    ``delta_t = e_t + J_t delta_{t-1}``, a gain below 1 bounds the deployed
+    deviation by ``||e|| / (1 - gain)`` while a gain above 1 leaves it unbounded.
+
+    ``step_fn`` must run attention under the ``math`` backend: the fused SDPA
+    kernel has no forward-mode AD rule, so a JVP through it raises.
+
+    Cost is one forward-mode JVP. The tangent is supported on a single position
+    per sequence and the output is read at that same position, which makes this
+    the *exact* diagonal block ``dm_t/dm_{t-1}`` rather than a windowed mixture:
+    perturbing only ``mem_in[t]`` and reading only ``m[t]`` admits no other path.
+    """
+    tangent = torch.zeros_like(mem_in)
+    rows = torch.arange(mem_in.shape[0], device=mem_in.device)
+    v = torch.randn(
+        mem_in.shape[0], mem_in.shape[-1],
+        generator=generator, device=mem_in.device, dtype=mem_in.dtype,
+    )
+    v = v / v.norm(dim=-1, keepdim=True).clamp_min(1e-12)
+    tangent[rows, positions] = v
+
+    _, jv = torch.func.jvp(step_fn, (mem_in,), (tangent,))
+    gain = jv[rows, positions].norm(dim=-1)  # ||J v|| with ||v|| = 1
+    log_gain = gain.clamp_min(1e-8).log()
+    return (log_gain - math.log(target_gain)).pow(2).mean()

@@ -371,6 +371,12 @@ class LossConfig:
     unroll_k: int = 1
     # Weight on the closed-loop iterates relative to the k=1 term.
     unroll_weight: float = 1.0
+    # Propagation-preserving regularisation. Measured motivation: the
+    # consistency loss drives rho(dm_t/dm_{t-1}) from 0.728 at lambda=0 to
+    # ~0.01 at lambda=0.03, below its value at random init (~0.10) -- memory is
+    # read but never written forward. 0.0 disables it (Maglev as published).
+    propagation_weight: float = 0.0
+    propagation_target: float = 1.0
     influence: InfluenceConfig = field(default_factory=InfluenceConfig)
 
     def validate(self, model: ModelConfig) -> None:
@@ -400,6 +406,10 @@ class LossConfig:
                 f"loss.mask_k_pct is set but consistency={self.consistency!r} "
                 "does not use a mask"
             )
+        if self.propagation_weight < 0:
+            raise ConfigError("loss.propagation_weight must be non-negative")
+        if self.propagation_target <= 0:
+            raise ConfigError("loss.propagation_target must be positive")
         if self.unroll_k < 1:
             raise ConfigError("loss.unroll_k must be >= 1 (1 = Maglev's single pass)")
         if self.unroll_weight < 0:

@@ -37,7 +37,8 @@ from .config import Config, ConfigError, load_config
 from .data.synthetic import ProbeBatch, SyntheticGenerator
 from .evaluate import probe_accuracy
 from .influence import InfluenceEMA, grad_influence, saliency_influence
-from .losses import MASK_KINDS, consistency_loss, cross_entropy, influence_mask
+from .losses import (MASK_KINDS, consistency_loss, cross_entropy,
+                     influence_mask, propagation_penalty)
 from .model.baselines import full_attention_baseline, swa_baseline
 from .model.maglev import MaglevModel
 
@@ -61,6 +62,7 @@ CSV_COLUMNS = [
     "w_entropy_ratio",
     "w_max_over_uniform",
     "consistency",
+    "propagation",
 ]
 
 
@@ -201,6 +203,7 @@ class StepMetrics:
     w_entropy_ratio: float = float("nan")
     w_max_over_uniform: float = float("nan")
     consistency: float = 0.0
+    propagation: float = 0.0
 
 
 class Trainer:
@@ -302,6 +305,7 @@ class Trainer:
         self.opt.zero_grad(set_to_none=True)
         ce_total = 0.0
         cons_total = 0.0
+        prop_total = 0.0
         for micro in range(self.accum):
             batch = self._micro_batch(self.step, micro)
             tokens = batch.tokens.to(self.device)
@@ -310,10 +314,13 @@ class Trainer:
                 logits, m, m_prime = forward_logits(self.model, tokens)
                 ce = cross_entropy(logits, targets)
                 cons = self._consistency_terms(tokens, m, m_prime)
-                loss = ce + self.cfg.loss.lam * cons
+                prop = self._propagation(tokens, m_prime)
+                loss = (ce + self.cfg.loss.lam * cons
+                        + self.cfg.loss.propagation_weight * prop)
             self.scaler.scale(loss / self.accum).backward()
             ce_total += float(ce.detach()) / self.accum
             cons_total += float(cons.detach()) / self.accum
+            prop_total += float(prop.detach()) / self.accum
 
         if self.use_scaler:
             self.scaler.unscale_(self.opt)
@@ -333,6 +340,7 @@ class Trainer:
             tokens=self.step * self.cfg.optim.global_tokens_per_step,
             elapsed_s=self.elapsed,
             consistency=cons_total,
+            propagation=prop_total,
             **(self.influence.stats() if self.influence is not None else {}),
         )
         self.history.append(metrics)
@@ -384,6 +392,31 @@ class Trainer:
             _, prev, _ = self.model.forward_decoder(tokens, mem_in)
             total = total + self.cfg.loss.unroll_weight * self._consistency(prev, m_prime)
         return total / (1.0 + (k - 1) * self.cfg.loss.unroll_weight)
+
+    def _propagation(self, tokens: Tensor, m_prime: Optional[Tensor]) -> Tensor:
+        """Penalise the memory recurrence being switched off (SPEC deviation).
+
+        One forward-mode JVP under the math attention backend -- the fused SDPA
+        kernel has no forward-mode AD rule. A random position per sequence keeps
+        the cost at one extra pass while still touching every position over a
+        few steps.
+        """
+        w = self.cfg.loss.propagation_weight
+        if w == 0 or m_prime is None:
+            return torch.zeros((), device=self.device)
+        mem_in = MaglevModel.shift_memory(m_prime.detach())
+        b, t, _ = mem_in.shape
+        pos = torch.randint(
+            1, t, (b,), generator=self._mask_generator, device="cpu"
+        ).to(self.device)
+
+        def step(mi: Tensor) -> Tensor:
+            return self.model.forward_decoder(tokens, mi, impl="math")[1]
+
+        return propagation_penalty(
+            step, mem_in, pos,
+            target_gain=self.cfg.loss.propagation_target,
+        )
 
     def _mask_for_step(self) -> Tensor:
         """Top-k / bottom-k track the EMA; random-k is drawn once and kept."""
