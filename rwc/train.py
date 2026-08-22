@@ -37,7 +37,7 @@ from .config import Config, ConfigError, load_config
 from .data.synthetic import ProbeBatch, SyntheticGenerator
 from .evaluate import probe_accuracy
 from .influence import InfluenceEMA, grad_influence, saliency_influence
-from .losses import cross_entropy
+from .losses import MASK_KINDS, consistency_loss, cross_entropy, influence_mask
 from .model.baselines import full_attention_baseline, swa_baseline
 from .model.maglev import MaglevModel
 
@@ -60,6 +60,7 @@ CSV_COLUMNS = [
     "w_max",
     "w_entropy_ratio",
     "w_max_over_uniform",
+    "consistency",
 ]
 
 
@@ -199,6 +200,7 @@ class StepMetrics:
     w_max: float = float("nan")
     w_entropy_ratio: float = float("nan")
     w_max_over_uniform: float = float("nan")
+    consistency: float = 0.0
 
 
 class Trainer:
@@ -233,6 +235,11 @@ class Trainer:
             if cfg.loss.uses_influence
             else None
         )
+
+        # A fixed subset for mask_randomk -- the control for "the top k%" is
+        # "some k%", not a fresh k% each step (see losses.influence_mask).
+        self._mask_generator = torch.Generator(device="cpu").manual_seed(cfg.run.seed)
+        self._fixed_mask: Optional[Tensor] = None
 
         self.step = 0
         self.history: List[StepMetrics] = []
@@ -294,15 +301,19 @@ class Trainer:
 
         self.opt.zero_grad(set_to_none=True)
         ce_total = 0.0
+        cons_total = 0.0
         for micro in range(self.accum):
             batch = self._micro_batch(self.step, micro)
             tokens = batch.tokens.to(self.device)
             targets = batch.targets.to(self.device)
             with self._autocast():
-                logits, _m, _m_prime = forward_logits(self.model, tokens)
+                logits, m, m_prime = forward_logits(self.model, tokens)
                 ce = cross_entropy(logits, targets)
-            self.scaler.scale(ce / self.accum).backward()
+                cons = self._consistency(m, m_prime)
+                loss = ce + self.cfg.loss.lam * cons
+            self.scaler.scale(loss / self.accum).backward()
             ce_total += float(ce.detach()) / self.accum
+            cons_total += float(cons.detach()) / self.accum
 
         if self.use_scaler:
             self.scaler.unscale_(self.opt)
@@ -315,16 +326,48 @@ class Trainer:
         self.step += 1
         metrics = StepMetrics(
             step=self.step,
-            loss=ce_total,
+            loss=ce_total + self.cfg.loss.lam * cons_total,
             ce=ce_total,
             lr=lr,
             grad_norm=grad_norm,
             tokens=self.step * self.cfg.optim.global_tokens_per_step,
             elapsed_s=self.elapsed,
+            consistency=cons_total,
             **(self.influence.stats() if self.influence is not None else {}),
         )
         self.history.append(metrics)
         return metrics
+
+    def _consistency(self, m: Tensor, m_prime: Optional[Tensor]) -> Tensor:
+        """The consistency term of SPEC.md section 5, or zero if inapplicable."""
+        kind = self.cfg.loss.consistency
+        if kind == "none" or self.cfg.loss.lam == 0:
+            return m.new_zeros(())
+        if m_prime is None:
+            # SWA/full baselines have no prefiller, so there is no target to be
+            # consistent with. Rejected at config load, but asserted here too.
+            raise ConfigError(
+                f"model.kind={self.cfg.model.kind!r} has no prefiller, so "
+                f"loss.consistency={kind!r} is not applicable"
+            )
+        weights = mask = None
+        if kind == "rwc":
+            weights = self.influence.value.detach()
+        elif kind in MASK_KINDS:
+            mask = self._mask_for_step()
+        return consistency_loss(m, m_prime, kind=kind, weights=weights, mask=mask)
+
+    def _mask_for_step(self) -> Tensor:
+        """Top-k / bottom-k track the EMA; random-k is drawn once and kept."""
+        kind = self.cfg.loss.consistency
+        k_pct = self.cfg.loss.mask_k_pct
+        if kind == "mask_randomk":
+            if self._fixed_mask is None:
+                self._fixed_mask = influence_mask(
+                    self.influence.value, kind, k_pct, generator=self._mask_generator
+                ).to(self.device)
+            return self._fixed_mask
+        return influence_mask(self.influence.value.detach(), kind, k_pct)
 
     def _maybe_refresh_influence(self) -> None:
         """Recompute read-influence on a slow EMA (SPEC.md section 5).
@@ -398,6 +441,7 @@ class Trainer:
             "steps": self.step,
             "wall_clock_s": self.elapsed,
             "final_ce": self.history[-1].ce if self.history else None,
+            "final_consistency": self.history[-1].consistency if self.history else None,
             # Headline: the deployed model (Eq. 10). The parallel figure is kept
             # alongside it purely as a diagnostic -- a large gap between the two
             # means the memory chain is not carrying what the prefiller wrote,
@@ -502,6 +546,8 @@ class Trainer:
             "elapsed_s": self.elapsed,
             "data": self.data.state_dict() if hasattr(self.data, "state_dict") else {},
             "influence": self.influence.state_dict() if self.influence else None,
+            "fixed_mask": self._fixed_mask,
+            "mask_generator": self._mask_generator.get_state(),
             "rng": {
                 "torch": torch.get_rng_state(),
                 "cuda": torch.cuda.get_rng_state_all() if torch.cuda.is_available() else [],
@@ -528,6 +574,12 @@ class Trainer:
             self.data.load_state_dict(state.get("data", {}))
         if self.influence is not None and state.get("influence"):
             self.influence.load_state_dict(state["influence"])
+        # The random-k subset is part of the experiment, not a nuisance: a
+        # resumed run that redrew it would be running a different ablation.
+        if state.get("fixed_mask") is not None:
+            self._fixed_mask = state["fixed_mask"].to(self.device)
+        if state.get("mask_generator") is not None:
+            self._mask_generator.set_state(state["mask_generator"])
 
         rng = state["rng"]
         torch.set_rng_state(rng["torch"])

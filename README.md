@@ -34,13 +34,12 @@ per distance bucket and never averaged into one number.
 | M2 — attention, blocks, Maglev prefiller/decoder, baselines | **done** |
 | M3 — synthetic data, resumable trainer, run queue | **done** |
 | M4 — read-influence estimators + ground-truth validity gate | **done** |
-| M5 — losses and the C1 decorrelation curve | pending |
+| M5 — losses and the C1 decorrelation curve | **done** |
 | M6 — full grid and figures | pending |
 
-`rwc/losses.py::consistency_loss`, `rwc/evaluate.py::bits_per_byte`,
-`rwc/analysis.py`, `scripts/make_figures.py` and the FineWeb-Edu pipeline in
-`rwc/data/lm.py` raise `NotImplementedError` naming their milestone. Everything
-else is built and tested: `pytest tests/ -q` is 133 passed, 0 skipped.
+`scripts/make_figures.py` (M6) and the FineWeb-Edu pipeline in `rwc/data/lm.py`
+raise `NotImplementedError` naming their milestone. Everything else is built and
+tested: `pytest tests/ -q` is 177 passed, 0 skipped.
 
 ### Verification numbers as built
 

@@ -1,7 +1,10 @@
 """Evaluation: probe accuracy per distance bucket, and BPB for the LM runs.
 
-M3 implements probe accuracy, which the trainer reports and the run manifest
-records. BPB and the C1 correlation land in M5.
+Probe accuracy is measured on the model as *deployed* (Eq. 10) -- prefiller
+discarded, decoder recurrent on its own memory. Measuring the parallel path
+instead saturates near 1.0 at every retrieval distance, because the prefiller's
+full attention hands the decoder the answer, and the distance axis then carries
+no signal at all. The C1 correlation lives in analysis.py.
 
 Probe accuracy is *always* broken out per distance bucket and never averaged
 into a single number (SPEC.md section 6): the slope against distance is the
@@ -10,6 +13,7 @@ finding, and a mean would destroy it.
 
 from __future__ import annotations
 
+import math
 from typing import Callable, Dict, Iterable, List, Optional
 
 import torch
@@ -72,6 +76,15 @@ def chance_accuracy(gen: SyntheticGenerator) -> float:
     return 1.0 / gen.vocab.n_values
 
 
-def bits_per_byte(*args, **kwargs):
-    """BPB for the LM runs, comparable to Maglev's table. Milestone M5."""
-    raise NotImplementedError("milestone M5: see SPEC.md section 9")
+def bits_per_byte(mean_ce_nats: float, n_tokens: int, n_bytes: int) -> float:
+    """Bits per byte, so numbers are comparable to Maglev's table.
+
+    ``bpb = (CE_nats / ln 2) * (tokens / bytes)``. Reported instead of raw loss
+    because loss depends on the tokenizer -- a 16k vocab and a 50k vocab give
+    different CE for identical modelling quality, and this project uses a 16k
+    one (SPEC.md section 6). The byte count comes from the shard metadata
+    written by scripts/prepare_lm_data.py.
+    """
+    if n_bytes <= 0 or n_tokens <= 0:
+        raise ValueError(f"need positive token and byte counts, got {n_tokens}, {n_bytes}")
+    return (mean_ce_nats / math.log(2.0)) * (n_tokens / n_bytes)

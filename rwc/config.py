@@ -498,6 +498,13 @@ class Config:
         self.model.validate()
         self.data.validate(self.model)
         self.loss.validate(self.model)
+        # The baselines have no prefiller, so there is no m' to be consistent
+        # with. Caught here rather than at step 1 of a queued Colab run.
+        if self.model.kind != "maglev" and self.loss.consistency != "none":
+            raise ConfigError(
+                f"model.kind={self.model.kind!r} has no prefiller, so "
+                f"loss.consistency={self.loss.consistency!r} is not applicable"
+            )
         self.optim.validate(self.data, cuda_available=cuda_available)
         self.run.validate(self.optim)
         return self
