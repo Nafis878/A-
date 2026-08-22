@@ -36,9 +36,7 @@ from torch import Tensor, nn
 from .config import Config, ConfigError, load_config
 from .data.synthetic import ProbeBatch, SyntheticGenerator
 from .evaluate import probe_accuracy
-from .influence import InfluenceEMA, grad_influence, saliency_influence
-from .losses import (MASK_KINDS, consistency_loss, cross_entropy,
-                     influence_mask, propagation_penalty)
+from .losses import consistency_loss, cross_entropy, propagation_penalty
 from .model.baselines import full_attention_baseline, swa_baseline
 from .model.maglev import MaglevModel
 
@@ -53,14 +51,6 @@ CSV_COLUMNS = [
     "grad_norm",
     "tokens",
     "elapsed_s",
-    # Logged every step so a collapse of w is visible early: entropy_ratio ~1
-    # means RWC has degenerated into the uniform L2 it is meant to improve on,
-    # and ~0 means it has spiked onto one dimension. Both look fine in the loss.
-    "w_mean",
-    "w_std",
-    "w_max",
-    "w_entropy_ratio",
-    "w_max_over_uniform",
     "consistency",
     "propagation",
 ]
@@ -218,11 +208,6 @@ class StepMetrics:
     grad_norm: float
     tokens: int
     elapsed_s: float
-    w_mean: float = float("nan")
-    w_std: float = float("nan")
-    w_max: float = float("nan")
-    w_entropy_ratio: float = float("nan")
-    w_max_over_uniform: float = float("nan")
     consistency: float = 0.0
     propagation: float = 0.0
 
@@ -254,16 +239,11 @@ class Trainer:
         )
         self.scaler = torch.amp.GradScaler("cuda", enabled=self.use_scaler)
         self.data = self._build_data()
-        self.influence = (
-            InfluenceEMA(cfg.loss.influence, cfg.model.d_model, self.device)
-            if cfg.loss.uses_influence
-            else None
-        )
 
-        # A fixed subset for mask_randomk -- the control for "the top k%" is
-        # "some k%", not a fresh k% each step (see losses.influence_mask).
-        self._mask_generator = torch.Generator(device="cpu").manual_seed(cfg.run.seed)
-        self._fixed_mask: Optional[Tensor] = None
+
+        # Position sampling for the propagation penalty. Checkpointed so a
+        # resumed run draws the same positions an uninterrupted one would.
+        self._rng = torch.Generator(device="cpu").manual_seed(cfg.run.seed)
 
         self.step = 0
         self.history: List[StepMetrics] = []
@@ -321,8 +301,6 @@ class Trainer:
         for group in self.opt.param_groups:
             group["lr"] = lr
 
-        self._maybe_refresh_influence()
-
         self.opt.zero_grad(set_to_none=True)
         ce_total = 0.0
         cons_total = 0.0
@@ -337,7 +315,7 @@ class Trainer:
             with self._autocast():
                 logits, m, m_prime = forward(self.model, tokens)
                 ce = cross_entropy(logits, targets)
-                cons = self._consistency_terms(tokens, m, m_prime)
+                cons = self._consistency(m, m_prime)
                 prop = self._propagation(tokens, m_prime)
                 loss = (ce + self.cfg.loss.lam * cons
                         + self.cfg.loss.propagation_weight * prop)
@@ -365,7 +343,6 @@ class Trainer:
             elapsed_s=self.elapsed,
             consistency=cons_total,
             propagation=prop_total,
-            **(self.influence.stats() if self.influence is not None else {}),
         )
         self.history.append(metrics)
         return metrics
@@ -382,40 +359,10 @@ class Trainer:
                 f"model.kind={self.cfg.model.kind!r} has no prefiller, so "
                 f"loss.consistency={kind!r} is not applicable"
             )
-        weights = mask = None
-        if kind == "rwc":
-            weights = self.influence.value.detach()
-        elif kind in MASK_KINDS:
-            mask = self._mask_for_step()
         return consistency_loss(
-            m, m_prime, kind=kind, weights=weights, mask=mask,
-            detach_target=self.cfg.loss.detach_target,
+            m, m_prime, kind=kind, detach_target=self.cfg.loss.detach_target,
         )
 
-    def _consistency_terms(
-        self, tokens: Tensor, m: Tensor, m_prime: Optional[Tensor]
-    ) -> Tensor:
-        """Maglev's one-step term, plus the closed-loop iterates when k > 1.
-
-        Iterate j feeds back the decoder's own memory from iterate j-1, which is
-        exactly the closed loop for the first j positions. The fed-back memory is
-        *detached*: the objective is "recover the target from the state you
-        actually produced", so each pass carries a one-step gradient and the
-        graph does not deepen with k. That keeps the cost k forward passes and
-        the memory cost flat, and it is the same truncation scheduled sampling
-        makes -- the difference is that this stays parallel.
-        """
-        k = self.cfg.loss.unroll_k
-        total = self._consistency(m, m_prime)
-        if k == 1 or m_prime is None or self.cfg.loss.lam == 0:
-            return total
-
-        prev = m
-        for _ in range(2, k + 1):
-            mem_in = MaglevModel.shift_memory(prev.detach())
-            _, prev, _ = self.model.forward_decoder(tokens, mem_in)
-            total = total + self.cfg.loss.unroll_weight * self._consistency(prev, m_prime)
-        return total / (1.0 + (k - 1) * self.cfg.loss.unroll_weight)
 
     def _propagation(self, tokens: Tensor, m_prime: Optional[Tensor]) -> Tensor:
         """Penalise the memory recurrence being switched off (SPEC deviation).
@@ -431,7 +378,7 @@ class Trainer:
         mem_in = MaglevModel.shift_memory(m_prime.detach())
         b, t, _ = mem_in.shape
         pos = torch.randint(
-            1, t, (b,), generator=self._mask_generator, device="cpu"
+            1, t, (b,), generator=self._rng, device="cpu"
         ).to(self.device)
 
         def step(mi: Tensor) -> Tensor:
@@ -442,45 +389,7 @@ class Trainer:
             target_gain=self.cfg.loss.propagation_target,
         )
 
-    def _mask_for_step(self) -> Tensor:
-        """Top-k / bottom-k track the EMA; random-k is drawn once and kept."""
-        kind = self.cfg.loss.consistency
-        k_pct = self.cfg.loss.mask_k_pct
-        if kind == "mask_randomk":
-            if self._fixed_mask is None:
-                self._fixed_mask = influence_mask(
-                    self.influence.value, kind, k_pct, generator=self._mask_generator
-                ).to(self.device)
-            return self._fixed_mask
-        return influence_mask(self.influence.value.detach(), kind, k_pct)
 
-    def _maybe_refresh_influence(self) -> None:
-        """Recompute read-influence on a slow EMA (SPEC.md section 5).
-
-        Refreshing every step would cost a whole extra pass; the EMA makes the
-        amortised cost negligible while keeping the weights current.
-        """
-        if self.influence is None or not self.influence.should_refresh(self.step):
-            return
-        batch = self._micro_batch(self.step, 0)
-        tokens = batch.tokens.to(self.device)
-        cfg = self.cfg.loss.influence
-        self.model.eval()
-        try:
-            if cfg.estimator == "saliency":
-                w = saliency_influence(self.model, tokens, eps=cfg.eps)
-            else:
-                w = grad_influence(
-                    self.model,
-                    tokens,
-                    batch.targets.to(self.device),
-                    horizon_H=cfg.horizon_H,
-                    detach_local=cfg.detach_local,
-                    eps=cfg.eps,
-                )
-        finally:
-            self.model.train()
-        self.influence.update(w)
 
     @property
     def elapsed(self) -> float:
@@ -630,9 +539,7 @@ class Trainer:
             "scaler": self.scaler.state_dict(),
             "elapsed_s": self.elapsed,
             "data": self.data.state_dict() if hasattr(self.data, "state_dict") else {},
-            "influence": self.influence.state_dict() if self.influence else None,
-            "fixed_mask": self._fixed_mask,
-            "mask_generator": self._mask_generator.get_state(),
+            "rng_propagation": self._rng.get_state(),
             "rng": {
                 "torch": torch.get_rng_state(),
                 "cuda": torch.cuda.get_rng_state_all() if torch.cuda.is_available() else [],
@@ -657,14 +564,8 @@ class Trainer:
         self._t0 = time.time()
         if hasattr(self.data, "load_state_dict"):
             self.data.load_state_dict(state.get("data", {}))
-        if self.influence is not None and state.get("influence"):
-            self.influence.load_state_dict(state["influence"])
-        # The random-k subset is part of the experiment, not a nuisance: a
-        # resumed run that redrew it would be running a different ablation.
-        if state.get("fixed_mask") is not None:
-            self._fixed_mask = state["fixed_mask"].to(self.device)
-        if state.get("mask_generator") is not None:
-            self._mask_generator.set_state(state["mask_generator"])
+        if state.get("rng_propagation") is not None:
+            self._rng.set_state(state["rng_propagation"])
 
         rng = state["rng"]
         torch.set_rng_state(rng["torch"])

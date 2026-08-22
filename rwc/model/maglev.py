@@ -61,16 +61,6 @@ class RecurrentInjection(nn.Module):
         # RMSNorm of Eq. 6, computed per head over d_head with a per-key-dim gain.
         self.k_rec_gain = nn.Parameter(torch.ones(cfg.d_kv))
 
-        # Ground-truth read structure for tests/test_influence_groundtruth.py.
-        # Because W_k_rec and W_v_rec are the *only* route from memory into the
-        # network, scaling memory by a known gain vector makes each dimension's
-        # readability known by construction; a zero gain is provably unreadable.
-        if cfg.carrier_gain_seed is None:
-            self.register_buffer("carrier_gain", None, persistent=False)
-        else:
-            self.register_buffer(
-                "carrier_gain", _carrier_gain(cfg), persistent=True
-            )
 
     def _norm_k_rec(self, k_rec: Tensor) -> Tensor:
         """RMSNorm over d_head, per head (Eq. 6)."""
@@ -105,8 +95,6 @@ class RecurrentInjection(nn.Module):
         gates are the one place a *local*-path dependence on memory leaks in, so
         detaching them confines the gradient to the recurrent channel.
         """
-        if self.carrier_gain is not None:
-            mem = mem * self.carrier_gain
 
         k_rec = self._norm_k_rec(self.W_k_rec(mem))  # Eq. 6
         v_rec = self.W_v_rec(mem)  # Eq. 6
@@ -125,21 +113,6 @@ class RecurrentInjection(nn.Module):
         return k_bar, v_bar, g_rec
 
 
-def _carrier_gain(cfg: ModelConfig) -> Tensor:
-    """Fixed, known per-dimension readability for the influence validity test.
-
-    Graded rather than binary: a two-level mask would make the ground-truth
-    ranking almost all ties, which strips Spearman of the power to detect that
-    an estimator is ordering the readable dimensions correctly.
-    """
-    g = torch.Generator().manual_seed(int(cfg.carrier_gain_seed))
-    d = cfg.d_model
-    n_carrier = max(1, int(round(cfg.carrier_frac * d)))
-    gain = torch.zeros(d)
-    idx = torch.randperm(d, generator=g)[:n_carrier]
-    # Log-uniform over two decades, so the carriers themselves are well separated.
-    gain[idx] = torch.exp(torch.rand(n_carrier, generator=g) * 4.6 - 2.3)
-    return gain
 
 
 class MaglevModel(nn.Module):
@@ -178,6 +151,13 @@ class MaglevModel(nn.Module):
 
         self.injections = nn.ModuleList(
             RecurrentInjection(cfg) for _ in range(cfg.n_layers)
+        )
+
+        # Identity path for the memory (see ModelConfig.memory_residual). Bias
+        # is set so the gate starts near 1: the recurrence begins at roughly the
+        # identity, making maintenance free and leaving only writing to learn.
+        self.mem_gate = (
+            nn.Linear(cfg.d_model, cfg.d_model) if cfg.memory_residual else None
         )
 
         if cfg.tie_embeddings:
@@ -283,6 +263,13 @@ class MaglevModel(nn.Module):
             aux.append(a)
 
         m = self.decoder_norm(h)  # the decoder's post-final-norm state *is* m_t
+        if self.mem_gate is not None:
+            # m_t = f * m_{t-1} + (1 - f) * decoder_norm(h_t). mem_in[t] is
+            # m_{t-1} by construction (Eq. 3's shift), so this is exactly a
+            # GRU-style convex update on the memory, and it holds identically in
+            # the parallel and recurrent paths.
+            f = torch.sigmoid(self.mem_gate(h) + self.cfg.memory_gate_bias)
+            m = f * mem_in + (1.0 - f) * m
         return self._head(m), m, tuple(aux)
 
     def forward_train(

@@ -22,7 +22,6 @@ __all__ = [
     "ConfigError",
     "ModelConfig",
     "DataConfig",
-    "InfluenceConfig",
     "LossConfig",
     "OptimConfig",
     "RunConfig",
@@ -49,19 +48,9 @@ _HASH_EXCLUDED_RUN_FIELDS = frozenset({
 
 _LAYER_KINDS = frozenset({"S", "L"})
 
-CONSISTENCY_KINDS = (
-    "none",
-    "uniform",
-    "rwc",
-    "mask_topk",
-    "mask_bottomk",
-    "mask_randomk",
-)
-_MASK_KINDS = frozenset({"mask_topk", "mask_bottomk", "mask_randomk"})
-# Loss kinds that consume read-influence weights and therefore need InfluenceConfig.
-_INFLUENCE_KINDS = frozenset({"rwc"}) | _MASK_KINDS
+CONSISTENCY_KINDS = ("none", "uniform")
 
-SYNTHETIC_TASKS = ("needle", "two_hop", "delayed_recall", "carrier_copy")
+SYNTHETIC_TASKS = ("needle", "two_hop", "delayed_recall")
 
 
 # --------------------------------------------------------------------------
@@ -103,10 +92,22 @@ class ModelConfig:
     # read attn_mass off (SPEC.md section 4). "sdpa" is the fast training path.
     attn_impl: Literal["sdpa", "math"] = "sdpa"
 
-    # Set only by the influence ground-truth task: fixes, by construction, which
-    # memory dimensions can be read at all. None means "no constraint".
-    carrier_gain_seed: Optional[int] = None
-    carrier_frac: float = 0.25
+
+    # Maglev writes memory as m_t = decoder_norm(h_t): the state is recomputed
+    # from scratch every step, with no identity path from m_{t-1}. MAINTAINING
+    # a memory therefore requires the block stack to learn to reconstruct
+    # m_{t-1} exactly, at every position, before it can learn anything else.
+    # Measured consequence: the chain never carries a retrieval binding, under
+    # teacher forcing OR direct BPTT, on a task full attention solves at 1.000.
+    # (Not a vanishing-gradient problem -- closed-loop gradient is flat in D.)
+    #
+    # memory_residual makes maintenance the default instead of something to be
+    # learned:   m_t = f * m_{t-1} + (1 - f) * decoder_norm(h_t),
+    # with f = sigmoid(W_f h_t + bias). memory_gate_bias > 0 starts f near 1, so
+    # the recurrence begins at approximately the identity and the model only has
+    # to learn when to WRITE, not how to remember.
+    memory_residual: bool = False
+    memory_gate_bias: float = 2.0
 
     # ---- derived geometry -------------------------------------------------
 
@@ -164,6 +165,8 @@ class ModelConfig:
 
         n_blocks = self.n_layers if self.sharing == "shared" else 2 * self.n_layers
         non_emb = n_blocks * per_block
+        if self.memory_residual:
+            non_emb += d * d + d  # memory forget gate
         non_emb += self.n_layers * per_injection
         if self.sharing == "shared":
             non_emb += d  # one final norm, used by both paths
@@ -225,8 +228,6 @@ class ModelConfig:
             raise ConfigError("vocab_size must be positive")
         if self.logit_cap <= 0:
             raise ConfigError("logit_cap must be positive")
-        if not 0.0 < self.carrier_frac <= 1.0:
-            raise ConfigError("carrier_frac must lie in (0, 1]")
 
 
 # --------------------------------------------------------------------------
@@ -328,38 +329,11 @@ class DataConfig:
 
 
 @dataclass
-class InfluenceConfig:
-    """Read-influence estimation (SPEC.md section 4)."""
-
-    estimator: Literal["saliency", "grad"] = "saliency"
-    horizon_H: int = 64  # positions j+1 .. j+H that the memory is read over
-    refresh_every: int = 50
-    ema_decay: float = 0.9
-    detach_local: bool = True
-    eps: float = 1e-8
-
-    def validate(self, model: ModelConfig) -> None:
-        if self.estimator not in ("saliency", "grad"):
-            raise ConfigError(f"unknown influence.estimator {self.estimator!r}")
-        if self.horizon_H < 1:
-            raise ConfigError("influence.horizon_H must be >= 1")
-        if self.refresh_every < 1:
-            raise ConfigError("influence.refresh_every must be >= 1")
-        if not 0.0 < self.ema_decay < 1.0:
-            raise ConfigError("influence.ema_decay must lie strictly in (0, 1)")
-        if self.eps <= 0:
-            raise ConfigError("influence.eps must be positive")
-
-
-@dataclass
 class LossConfig:
     """CE plus the consistency term under test (SPEC.md section 5)."""
 
     lam: float = 0.0
-    consistency: Literal[
-        "none", "uniform", "rwc", "mask_topk", "mask_bottomk", "mask_randomk"
-    ] = "none"
-    mask_k_pct: Optional[float] = None
+    consistency: Literal["none", "uniform"] = "none"
     # Stop-gradient on m' inside the consistency term only (CE still trains the
     # prefiller). Eq. 5 does not specify this, and it matters: with the pull
     # symmetric, the cheapest way to satisfy ||m - m'|| -> 0 at high lambda is
@@ -368,23 +342,12 @@ class LossConfig:
     # prefiller solved the memory-only buckets at 0.97 while the decoder got
     # 0.16; at lambda 1.0 both sat at 0.109. False reproduces Maglev as written.
     detach_target: bool = False
-    # Closed-loop unroll depth (CL-RWC). k=1 is Maglev exactly: one parallel
-    # pass, decoder fed the prefiller's memory. k>1 iterates that pass, feeding
-    # back the decoder's OWN previous iterate, which reproduces the true closed
-    # loop exactly for the first k positions (verified to 0.0 in fp64) while
-    # staying parallel. Maglev trains only the one-step residual
-    # e_t = m_t - m'_t, but the deployed error obeys d_t = e_t + J_t d_{t-1};
-    # controlling e says nothing about its amplification through J.
-    unroll_k: int = 1
-    # Weight on the closed-loop iterates relative to the k=1 term.
-    unroll_weight: float = 1.0
     # Propagation-preserving regularisation. Measured motivation: the
     # consistency loss drives rho(dm_t/dm_{t-1}) from 0.728 at lambda=0 to
     # ~0.01 at lambda=0.03, below its value at random init (~0.10) -- memory is
     # read but never written forward. 0.0 disables it (Maglev as published).
     propagation_weight: float = 0.0
     propagation_target: float = 1.0
-    influence: InfluenceConfig = field(default_factory=InfluenceConfig)
 
     def validate(self, model: ModelConfig) -> None:
         if self.consistency not in CONSISTENCY_KINDS:
@@ -399,38 +362,7 @@ class LossConfig:
                 f"loss.lam={self.lam} has no effect with consistency='none'; "
                 "set consistency or set lam=0"
             )
-        if self.consistency in _MASK_KINDS:
-            if self.mask_k_pct is None:
-                raise ConfigError(
-                    f"loss.consistency={self.consistency!r} requires loss.mask_k_pct"
-                )
-            if not 0.0 < self.mask_k_pct <= 100.0:
-                raise ConfigError(
-                    f"loss.mask_k_pct={self.mask_k_pct} must lie in (0, 100]"
-                )
-        elif self.mask_k_pct is not None:
-            raise ConfigError(
-                f"loss.mask_k_pct is set but consistency={self.consistency!r} "
-                "does not use a mask"
-            )
-        if self.propagation_weight < 0:
-            raise ConfigError("loss.propagation_weight must be non-negative")
-        if self.propagation_target <= 0:
-            raise ConfigError("loss.propagation_target must be positive")
-        if self.unroll_k < 1:
-            raise ConfigError("loss.unroll_k must be >= 1 (1 = Maglev's single pass)")
-        if self.unroll_weight < 0:
-            raise ConfigError("loss.unroll_weight must be non-negative")
-        if self.unroll_k > 1 and self.consistency == "none":
-            raise ConfigError(
-                "loss.unroll_k > 1 has no effect without a consistency loss"
-            )
-        if self.consistency in _INFLUENCE_KINDS:
-            self.influence.validate(model)
 
-    @property
-    def uses_influence(self) -> bool:
-        return self.consistency in _INFLUENCE_KINDS
 
 
 # --------------------------------------------------------------------------

@@ -280,16 +280,6 @@ def _queue():
     return run_queue
 
 
-def test_manifest_matches_the_spec_grid() -> None:
-    q = _queue()
-    manifest = q.build_manifest()
-    counts = {}
-    for run in manifest["runs"]:
-        counts[run["priority"]] = counts.get(run["priority"], 0) + 1
-    assert counts == q.EXPECTED_COUNTS
-    assert sum(counts.values()) == 38
-    assert all(r["status"] == "pending" for r in manifest["runs"])
-
 
 def test_every_manifest_entry_produces_a_valid_config() -> None:
     """A grid cell that cannot even load is a run silently lost hours later."""
@@ -408,123 +398,10 @@ def test_failed_cell_is_marked_not_silently_skipped(tmp_path: Path) -> None:
     assert entry["status"] == "failed" and entry["error"]
 
 
-def test_influence_ema_survives_a_resume(tmp_path: Path) -> None:
-    """The EMA is training state too; dropping it would silently reset w."""
-    over = {
-        "loss.consistency": "rwc",
-        "loss.lam": 1.0,
-        "loss.influence.refresh_every": 2,
-        "loss.influence.estimator": "saliency",
-    }
-    a = Trainer(tiny_config(tmp_path / "ema", **over), device=torch.device("cpu"))
-    assert a.influence is not None
-    a.run(max_steps=SPLIT, quiet=True)
-    assert a.influence.n_updates > 0, "influence was never refreshed"
-
-    b = Trainer(tiny_config(tmp_path / "ema", **over), device=torch.device("cpu"))
-    b.maybe_resume()
-    torch.testing.assert_close(a.influence.value, b.influence.value)
-    assert b.influence.n_updates == a.influence.n_updates
-
-    # And the resumed trace still matches a clean run.
-    clean = Trainer(tiny_config(tmp_path / "ema_clean", **over), device=torch.device("cpu"))
-    clean.run(quiet=True)
-    b.run(quiet=True)
-    combined = losses(a) + losses(b)
-    worst = max(abs(x - y) for x, y in zip(losses(clean), combined))
-    print(f"\n[resume+rwc] max |dloss| over {TOTAL} steps: {worst:.3e}")
-    assert worst == 0.0
 
 
-def test_influence_stats_reach_the_csv(tmp_path: Path) -> None:
-    """A collapse of w must be visible in the log, not only in a debugger."""
-    t = Trainer(
-        tiny_config(
-            tmp_path / "stats",
-            **{"loss.consistency": "rwc", "loss.lam": 1.0,
-               "loss.influence.refresh_every": 1},
-        ),
-        device=torch.device("cpu"),
-    )
-    t.run(max_steps=3, quiet=True)
-    header, *rows = (t.run_dir / "metrics.csv").read_text(encoding="utf-8").strip().splitlines()
-    cols = header.split(",")
-    for name in ("w_mean", "w_std", "w_max", "w_entropy_ratio", "w_max_over_uniform"):
-        assert name in cols
-    last = dict(zip(cols, rows[-1].split(",")))
-    assert 0.0 < float(last["w_entropy_ratio"]) <= 1.0
-    assert float(last["w_max_over_uniform"]) >= 1.0
 
 
-# --------------------------------------------------------------------------
-# Calibration ladder
-# --------------------------------------------------------------------------
-
-
-def test_calibration_cells_are_valid_and_distinct() -> None:
-    """The ladder exists because the first A100 batch sat at chance everywhere."""
-    q = _queue()
-    manifest = q.build_calibration_manifest()
-    assert len(manifest["runs"]) == len(q.CAL_CELLS)
-    hashes = {}
-    for run in manifest["runs"]:
-        cfg = load_config(
-            q.CONFIGS / run["config"], overrides=run["overrides"], cuda_available=True
-        )
-        assert cfg.config_hash not in hashes, f"{run['id']} duplicates {hashes[cfg.config_hash]}"
-        hashes[cfg.config_hash] = run["id"]
-        assert run["priority"] == 0, "calibration must outrank the science grid"
-        # The whole point: concentrate the gradient on the retrieval position.
-        assert cfg.data.loss_on_answer_only
-        assert cfg.optim.global_tokens_per_step % cfg.data.seq_len == 0
-
-
-def test_calibration_ladder_increases_in_difficulty() -> None:
-    """Cells must walk toward the real config, so the first failure localises it."""
-    q = _queue()
-    sizes = [(seq, len(d), distr) for _, seq, d, distr, _ in q.CAL_CELLS]
-    assert sizes[0] == (256, 1, 0), "the first rung should be the easiest"
-    assert sizes[-1][1] == 10, "the last rung should be the full needle distance grid"
-    assert [s[0] for s in sizes] == sorted(s[0] for s in sizes), "seq_len must not decrease"
-
-
-def test_summary_reports_chance_relative_accuracy(tmp_path: Path) -> None:
-    """A run at chance must read as ~1.0x and 'never escaped', not as a number."""
-    q = _queue()
-    manifest = q.build_calibration_manifest()
-    manifest["runs"] = manifest["runs"][:1]
-    run = manifest["runs"][0]
-    run["status"] = "done"
-    rd = tmp_path / run["id"]
-    rd.mkdir(parents=True)
-    run["run_dir"] = str(rd)
-
-    cfg = load_config(q.CONFIGS / run["config"], overrides=run["overrides"], cuda_available=True)
-    (rd / "result.json").write_text(json.dumps({
-        "config": cfg.to_dict(),
-        "probe_accuracy_by_distance": {"64": {"acc": 1.0 / 16, "nll": 2.77, "n": 64}},
-    }), encoding="utf-8")
-    (rd / "metrics.csv").write_text("step,ce\n1,2.80\n2,2.78\n", encoding="utf-8")
-
-    out = q.summarise_results(manifest, tmp_path)
-    assert "1.00x" in out
-    assert "None" in out, "a run that never escaped the plateau must say so"
-
-    # And a run that did learn reads clearly differently.
-    (rd / "metrics.csv").write_text("step,ce\n1,2.80\n2,1.10\n", encoding="utf-8")
-    (rd / "result.json").write_text(json.dumps({
-        "config": cfg.to_dict(),
-        "probe_accuracy_by_distance": {"64": {"acc": 0.80, "nll": 0.7, "n": 64}},
-    }), encoding="utf-8")
-    out = q.summarise_results(manifest, tmp_path)
-    assert "12.80x" in out
-    assert "         2" in out, "escape step should be reported"
-
-
-def test_summary_handles_runs_with_no_results_yet(tmp_path: Path) -> None:
-    q = _queue()
-    out = q.summarise_results(q.build_calibration_manifest(), tmp_path)
-    assert out.count("pending") == len(q.CAL_CELLS)
 
 
 # --------------------------------------------------------------------------
@@ -597,20 +474,6 @@ def test_baselines_have_no_separate_deployed_path(tmp_path: Path) -> None:
             forward_logits(t.model, batch.tokens)[0],
         )
 
-
-def test_grid_uses_answer_only_loss(tmp_path: Path) -> None:
-    """Confirmed by the calibration ladder; full-sequence CE never escaped."""
-    q = _queue()
-    for run in q.build_manifest()["runs"]:
-        cfg = load_config(
-            q.CONFIGS / run["config"], overrides=run["overrides"], cuda_available=True
-        )
-        if cfg.data.kind == "synthetic":
-            assert cfg.data.loss_on_answer_only, f"{run['id']} still uses full-seq CE"
-        else:
-            assert not cfg.data.loss_on_answer_only, (
-                f"{run['id']} is an LM run; full-sequence CE is correct there"
-            )
 
 
 def test_stale_checkpoint_is_retired_not_fatal(tmp_path: Path) -> None:

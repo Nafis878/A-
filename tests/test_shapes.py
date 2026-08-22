@@ -18,7 +18,6 @@ from rwc.config import (
     Config,
     ConfigError,
     DataConfig,
-    InfluenceConfig,
     LossConfig,
     ModelConfig,
     OptimConfig,
@@ -141,11 +140,6 @@ def test_grad_accum_hits_exact_token_budget() -> None:
         (_mutated(data__seq_len=99999), "exceeds"),
         (_mutated(loss__lam=-1.0, loss__consistency="uniform"), "non-negative"),
         (_mutated(loss__lam=1.0), "no effect with consistency='none'"),
-        (_mutated(loss__consistency="mask_topk", loss__lam=1.0), "requires loss.mask_k_pct"),
-        (_mutated(loss__mask_k_pct=25.0), "does not use a mask"),
-        (_mutated(loss__consistency="rwc", loss__lam=1.0, loss__influence__refresh_every=0), "refresh_every"),
-        (_mutated(loss__consistency="rwc", loss__lam=1.0, loss__influence__ema_decay=1.0), "ema_decay"),
-        (_mutated(loss__consistency="rwc", loss__lam=1.0, loss__influence__horizon_H=0), "horizon_H"),
         (_mutated(data__distances=[8, 700]), "does not fit"),
         (_mutated(optim__total_steps=100, optim__warmup=200), "warmup"),
         (_mutated(optim__global_tokens_per_step=1000), "not divisible by seq_len"),
@@ -201,7 +195,7 @@ def test_fp16_requires_cuda() -> None:
     [
         ({"model": {"d_modle": 256}}, "model"),
         ({"data": {"distancez": [8]}}, "data"),
-        ({"loss": {"influence": {"emma_decay": 0.9}}}, "loss.influence"),
+        ({"loss": {"lamm": 1.0}}, "loss"),
         ({"optim": {"learning_rate": 1e-3}}, "optim"),
     ],
 )
@@ -443,17 +437,3 @@ def test_delayed_recall_generator_rejects_reachable_distances() -> None:
         SyntheticGenerator(bad, cfg.model, seed=0)
 
 
-def test_carrier_copy_generates_delayed_recall_sequences() -> None:
-    import torch
-
-    from rwc.data.synthetic import SyntheticGenerator
-
-    over = dict(model__window=16, data__distances=[64, 128])
-    a = SyntheticGenerator(*_task_pair("carrier_copy", over), seed=0)
-    b = SyntheticGenerator(*_task_pair("delayed_recall", over), seed=0)
-    assert torch.equal(a.batch(0, 4).tokens, b.batch(0, 4).tokens)
-
-
-def _task_pair(task: str, over: Dict[str, Any]):
-    cfg = _cuda_free(_mutated(data__task=task, **over))
-    return cfg.data, cfg.model

@@ -1,26 +1,17 @@
-"""Read-influence estimators (SPEC.md section 4).
+"""Closed-loop gradient probe.
 
-Read-influence ``w_j`` measures how much each dimension of memory ``m_j``
-affects predictions at positions ``j+1 .. j+H`` *through the recurrent K/V
-channel* -- not general position importance.
+All that survives of the read-influence line, which was refuted: re-weighting
+memory dimensions cannot help when the loss switches the memory channel off.
 
-Two estimators:
+``grad_influence`` is kept because it produced a result the paper relies on --
+the gradient from a query DOES reach the planting site through the recurrence,
+essentially flat in distance (ratio 0.217 at D=32 against a rho^D prediction of
+3.9e-5). That rules out vanishing gradient as the reason the memory chain never
+learns to carry a binding.
 
-* **A, gradient** -- the reference. Exact, slow, used to validate B and to
-  produce the C1 diagnostic. Run as a truncated *recurrent* rollout: in
-  parallel teacher-forced mode the memory chain is broken (the memory input is
-  the prefiller's output, not the decoder's own state), so a parallel gradient
-  would see only within-window and cross-layer propagation and would understate
-  influence for ``H > W``. ``tests/test_recurrence_equivalence.py`` pins that
-  bound at ``L*(W-1)``.
-* **B, saliency** -- what RWC actually uses at training time, because it costs
-  one extra reduction over cached attention statistics rather than a backward
-  pass.
-
-Indexing convention, which is the easiest thing here to get wrong: the decoder
-at position ``t`` consumes ``mem_in[t] = m'_{t-1}``. So the influence of memory
-``m_j`` is the influence of the memory *input* at position ``j+1``. Everything
-below computes in mem-input space and shifts once, in ``_to_memory_index``.
+It must be run as a truncated recurrent rollout. In the parallel graph the
+memory chain does not exist, and the gradient there merely recovers the stacked
+local reach L*(W-1) -- exactly zero beyond it.
 """
 
 from __future__ import annotations
@@ -31,17 +22,10 @@ import torch
 import torch.nn.functional as F
 from torch import Tensor, nn
 
-from .config import InfluenceConfig
 from .losses import IGNORE_INDEX
 from .model.maglev import MaglevModel
 
-__all__ = [
-    "grad_influence",
-    "saliency_influence",
-    "InfluenceEMA",
-    "normalise",
-    "spearman",
-]
+__all__ = ["grad_influence", "default_anchors", "scored_positions", "normalise"]
 
 
 # --------------------------------------------------------------------------
@@ -73,12 +57,6 @@ def _to_memory_index(w_mem_input: Tensor) -> Tensor:
     return out
 
 
-def spearman(a: Tensor, b: Tensor) -> float:
-    """Spearman rank correlation between two 1-D tensors."""
-    from scipy.stats import spearmanr
-
-    rho = spearmanr(a.detach().cpu().numpy(), b.detach().cpu().numpy()).statistic
-    return float(rho)
 
 
 # --------------------------------------------------------------------------
@@ -223,114 +201,7 @@ def _keep_scored_anchors(
 # --------------------------------------------------------------------------
 
 
-@torch.no_grad()
-def saliency_influence(
-    model: MaglevModel,
-    tokens: Tensor,
-    *,
-    eps: float = 1e-8,
-    normalise_out: bool = True,
-) -> Tensor:
-    """Gradient x input style saliency from cached attention statistics.
-
-    ``w_j ~ | m_j * sum_l ( W_k_rec^T (attn_mass_j * g_rec_j)
-                          + W_v_rec^T (attn_mass_j * g_rec_j) ) |``
-
-    Returns ``(B, T, d)`` indexed by *memory* position ``j``.
-    """
-    out = model.forward_train(tokens, need_mass=True)
-    mem_in = MaglevModel.shift_memory(out.m_prime)
-
-    total = torch.zeros_like(mem_in)
-    for layer, aux in enumerate(out.aux):
-        inj = model.injections[layer]
-        # attn_mass arrives per *query* head; fold it back onto kv heads, then
-        # broadcast each kv head's mass across the d_head dims it owns.
-        mass = _mass_to_kv_dims(aux.attn_mass, model.cfg)
-        s = mass * aux.g_rec  # (B, T, d_kv)
-        # Linear weight is (d_kv, d), so `s @ W` applies W^T -- the transpose in
-        # the SPEC's formula, without materialising it.
-        total = total + s @ inj.W_k_rec.weight + s @ inj.W_v_rec.weight
-
-    mem_eff = mem_in
-    gain = model.injections[0].carrier_gain
-    if gain is not None:
-        # The gain is part of the model's read path, so an estimator that
-        # ignored it would be describing a network that does not exist.
-        mem_eff = mem_eff * gain
-
-    w = (mem_eff * total).abs()
-    if normalise_out:
-        w = normalise(w, eps)
-    # After this, position T-1 is exactly zero: m'_{T-1} would be consumed at
-    # position T, which does not exist. It is excluded from the loss, not
-    # normalised to something.
-    return _to_memory_index(w)
 
 
-def _mass_to_kv_dims(mass: Tensor, cfg) -> Tensor:
-    """(B, n_heads, T) attention mass -> (B, T, d_kv)."""
-    b, n_heads, t = mass.shape
-    n_rep = n_heads // cfg.n_kv_heads
-    per_kv = mass.view(b, cfg.n_kv_heads, n_rep, t).mean(dim=2)  # (B, Hkv, T)
-    per_kv = per_kv.permute(0, 2, 1)  # (B, T, Hkv)
-    return per_kv.repeat_interleave(cfg.d_head, dim=-1)  # (B, T, d_kv)
 
 
-# --------------------------------------------------------------------------
-# EMA smoothing, so the per-step cost is negligible
-# --------------------------------------------------------------------------
-
-
-class InfluenceEMA:
-    """Slow EMA of read-influence, refreshed every ``refresh_every`` steps.
-
-    The trainer logs ``stats()`` every step so a collapse is caught early:
-    ``w`` going uniform means RWC has degenerated into the uniform L2 it is
-    meant to improve on, and ``w`` spiking onto one dimension means the
-    consistency term has stopped constraining the memory at all. Both are
-    failure modes, and both look like "training is fine" from the loss alone.
-    """
-
-    def __init__(self, cfg: InfluenceConfig, d_model: int, device: torch.device) -> None:
-        self.cfg = cfg
-        self.d_model = d_model
-        self.value = torch.full((d_model,), 1.0 / d_model, device=device)
-        self.n_updates = 0
-
-    def should_refresh(self, step: int) -> bool:
-        return step % self.cfg.refresh_every == 0
-
-    def update(self, w: Tensor) -> Tensor:
-        """Fold a fresh estimate in. ``w`` is reduced to ``(d,)`` and renormalised."""
-        fresh = w.detach()
-        while fresh.dim() > 1:
-            fresh = fresh.mean(dim=0)
-        fresh = normalise(fresh, self.cfg.eps)
-        decay = self.cfg.ema_decay
-        self.value = decay * self.value + (1.0 - decay) * fresh.to(self.value.device)
-        self.value = normalise(self.value, self.cfg.eps)
-        self.n_updates += 1
-        return self.value
-
-    def stats(self) -> Dict[str, float]:
-        v = self.value
-        uniform = 1.0 / self.d_model
-        p = v / (v.sum() + self.cfg.eps)
-        entropy = float(-(p * (p + self.cfg.eps).log()).sum())
-        return {
-            "w_mean": float(v.mean()),
-            "w_std": float(v.std()),
-            "w_max": float(v.max()),
-            # 1.0 = perfectly uniform (RWC has degenerated to uniform L2),
-            # 0.0 = all mass on one dimension.
-            "w_entropy_ratio": entropy / float(torch.tensor(self.d_model).log()),
-            "w_max_over_uniform": float(v.max()) / uniform,
-        }
-
-    def state_dict(self) -> Dict[str, object]:
-        return {"value": self.value, "n_updates": self.n_updates}
-
-    def load_state_dict(self, state: Dict[str, object]) -> None:
-        self.value = torch.as_tensor(state["value"]).to(self.value.device)
-        self.n_updates = int(state["n_updates"])

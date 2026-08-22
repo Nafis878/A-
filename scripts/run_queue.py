@@ -5,8 +5,8 @@ gets picked up and continued. Disconnection is the normal case, not an error
 path -- a ``running`` run whose heartbeat has gone stale is reclaimed as
 ``pending``, which is how a dead session self-heals.
 
-The grid of SPEC.md section 8 is encoded in ``build_manifest`` in priority
-order, so if time runs out the scientifically important runs are already done.
+``build_manifest`` encodes the collapse study in priority order, so if time
+runs out the scientifically important runs are already done.
 """
 
 from __future__ import annotations
@@ -33,219 +33,76 @@ LOCK_STALE_SECONDS = 120
 CONFIGS = Path(__file__).resolve().parents[1] / "configs"
 
 # ---------------------------------------------------------------------------
-# The grid (SPEC.md section 8)
+# The grid
 # ---------------------------------------------------------------------------
 
-# Needle at W=64 with L=4: local reach is 4*63 = 252, so distances 8..48 are
-# solvable locally and 256..384 are memory-only. That crossing is what makes
-# the C3 slope measurable rather than a single averaged number.
+# Needle at W=64 with L=4: stacked local reach is 4*63 = 252, so distances
+# 8..192 are solvable by local attention and 256..384 require memory.
 SYNTH_BASE: Dict[str, Any] = {
     "data.task": "needle",
     "data.distances": [8, 16, 32, 48, 64, 96, 128, 192, 256, 384],
-    # Confirmed by the calibration ladder. Under full-sequence CE the answer is
-    # 1 scored position out of 511, so the gradient carrying the whole task is
-    # ~0.2% of the loss and the model never leaves the ln(n_values) plateau --
-    # all three of the first A100 runs sat at chance for 4000 steps. With
-    # answer-only CE every calibration cell escaped (steps 58-864) and reached
-    # 0.88-1.00 accuracy.
+    # Under full-sequence CE the answer is 1 scored position of 511, so the
+    # gradient carrying the task is ~0.2% of the loss and the model never leaves
+    # the ln(n_values) plateau. Confirmed by the calibration ladder.
     "data.loss_on_answer_only": True,
 }
 
-# carrier_copy needs every distance past the stacked local reach, so the window
-# is shrunk to keep a usable distance axis (4*15 = 60 < 64).
-CARRIER_BASE: Dict[str, Any] = {
-    "data.task": "carrier_copy",
-    "model.window": 16,
-    "model.carrier_gain_seed": 7,
-    "data.distances": [64, 96, 128, 192, 256, 384],
-    "data.loss_on_answer_only": True,
-}
-
-LAMBDAS = (0.1, 0.3, 1.0)
+LAMBDAS = (0.0, 0.03, 0.1, 0.3, 1.0)
 SHARINGS = ("shared", "separate")
-INFLUENCE = {"loss.influence.estimator": "saliency"}
 
 
 def build_manifest() -> Dict[str, Any]:
+    """The collapse study.
+
+    Read-weighted consistency, the masking ablations and the seed/scale groups
+    that served them are gone: the hypothesis was refuted by our own C1 and C3
+    measurements, and the collapse mechanism explains why it could never have
+    worked -- re-weighting WHICH dimensions to match is irrelevant once the loss
+    has switched the memory channel off.
+    """
     runs: List[Dict[str, Any]] = []
 
-    def add(priority: int, group: str, name: str, config: str, **over: Any) -> None:
-        runs.append(
-            {
-                "id": name,
-                "priority": priority,
-                "group": group,
-                "config": config,
-                "overrides": {"run.name": name, **over},
-            }
-        )
+    def add(priority: int, group: str, name: str, **over: Any) -> None:
+        runs.append({
+            "id": name, "priority": priority, "group": group,
+            "config": "tiny_synth.yaml",
+            "overrides": {"run.name": name, **over},
+        })
 
-    # 1 -- influence validation. Gates everything downstream.
-    for i, seed in enumerate((0, 1, 2)):
-        add(1, "influence_validation", f"p1_carrier_s{seed}", "tiny_synth.yaml",
-            **CARRIER_BASE, **{"run.seed": seed})
+    # 1 -- the collapse, and its dependence on parameter sharing. Reproduces the
+    # published lambda anomaly: shared severs between 0.03 and 0.1, separate
+    # between 0.1 and 0.3.
+    for sharing in SHARINGS:
+        for lam in LAMBDAS:
+            over = {"model.sharing": sharing}
+            if lam > 0:
+                over |= {"loss.consistency": "uniform", "loss.lam": lam}
+            add(1, "collapse", f"p1_{sharing}_lam{lam}", **SYNTH_BASE, **over)
 
-    # 2 -- uniform consistency lambda sweep: reproduce Maglev's anomaly.
-    for lam in LAMBDAS:
-        for sharing in SHARINGS:
-            add(2, "lambda_uniform", f"p2_uniform_lam{lam}_{sharing}", "tiny_synth.yaml",
-                **SYNTH_BASE, **{"loss.consistency": "uniform", "loss.lam": lam,
-                                 "model.sharing": sharing})
+    # 2 -- the intervention. propagation_weight prices the recurrence being
+    # switched off; measured to take rho from 0.002 to 0.680 and to turn the
+    # lambda=0.1 plateau into learning at 3/3 seeds.
+    # Seeds start at 1: the seed-0 control is p1_shared_lam0.1, an identical
+    # config, and emitting it twice would train the same cell twice.
+    for seed in (1, 2, 3, 4, 5):
+        for tag, extra in (("ctl", {}), ("pp", {"loss.propagation_weight": 0.1})):
+            add(2, "propagation", f"p2_{tag}_s{seed}", **SYNTH_BASE,
+                **{"loss.consistency": "uniform", "loss.lam": 0.1,
+                   "run.seed": seed}, **extra)
 
-    # 3 -- RWC lambda sweep: the C3 headline.
-    for lam in LAMBDAS:
-        for sharing in SHARINGS:
-            add(3, "lambda_rwc", f"p3_rwc_lam{lam}_{sharing}", "tiny_synth.yaml",
-                **SYNTH_BASE, **INFLUENCE,
-                **{"loss.consistency": "rwc", "loss.lam": lam, "model.sharing": sharing})
+    # 3 -- reference points. SWA fixes the floor (no memory at all); full
+    # attention fixes the ceiling and shows the task is solvable.
+    add(3, "baselines", "p3_swa", **SYNTH_BASE, **{"model.kind": "swa"})
+    add(3, "baselines", "p3_full", **SYNTH_BASE, **{"model.kind": "full"})
 
-    # 4 -- top-k masking at the pathological lambda: the C2 mechanism.
-    for k in (10, 25, 50, 100):
-        add(4, "mask_topk", f"p4_topk{k}", "tiny_synth.yaml",
-            **SYNTH_BASE, **INFLUENCE,
-            **{"loss.consistency": "mask_topk", "loss.mask_k_pct": float(k),
-               "loss.lam": 1.0, "model.sharing": "shared"})
-
-    # 5 -- mask controls: random-k and bottom-k must NOT reproduce top-k's effect.
-    for kind in ("mask_randomk", "mask_bottomk"):
-        add(5, "mask_controls", f"p5_{kind}25", "tiny_synth.yaml",
-            **SYNTH_BASE, **INFLUENCE,
-            **{"loss.consistency": kind, "loss.mask_k_pct": 25.0,
-               "loss.lam": 1.0, "model.sharing": "shared"})
-
-    # 6 -- reference points.
-    add(6, "baselines", "p6_swa", "tiny_synth.yaml", **SYNTH_BASE, **{"model.kind": "swa"})
-    add(6, "baselines", "p6_full", "tiny_synth.yaml", **SYNTH_BASE, **{"model.kind": "full"})
-    add(6, "baselines", "p6_maglev_lam0", "tiny_synth.yaml", **SYNTH_BASE)
-
-    # 7 -- error bars: two further seeds on the four headline cells (seed 0 is
-    # already covered by priorities 2 and 3).
-    headline = [
-        ("uniform", 1.0, "shared"), ("rwc", 1.0, "shared"),
-        ("uniform", 1.0, "separate"), ("rwc", 1.0, "separate"),
-    ]
-    for seed in (1, 2):
-        for consistency, lam, sharing in headline:
-            add(7, "seeds", f"p7_{consistency}_{sharing}_s{seed}", "tiny_synth.yaml",
-                **SYNTH_BASE, **INFLUENCE,
-                **{"loss.consistency": consistency, "loss.lam": lam,
-                   "model.sharing": sharing, "run.seed": seed})
-
-    # 8 -- natural-language confirmation.
-    add(8, "lm", "p8_lm_maglev", "small_lm.yaml",
-        **{"loss.consistency": "uniform", "loss.lam": 1.0})
-    add(8, "lm", "p8_lm_rwc", "small_lm.yaml", **INFLUENCE,
-        **{"loss.consistency": "rwc", "loss.lam": 1.0})
-
-    # 9 -- scale trend. Priority 8 already supplies the `small` point, so these
-    # four runs add the two *other* widths, giving a genuine three-point trend
-    # (tiny / small / medium) rather than re-running a cell that already exists.
-    TINY_LM = {"model.d_model": 256, "model.n_layers": 8, "model.n_heads": 4,
-               "model.n_kv_heads": 2, "model.window": 128}
-    for tag, extra in (("tinylm", TINY_LM), ("medium", {})):
-        cfg_name = "small_lm.yaml" if tag == "tinylm" else "medium_lm.yaml"
-        add(9, "scale", f"p9_{tag}_maglev", cfg_name, **extra,
-            **{"loss.consistency": "uniform", "loss.lam": 1.0})
-        add(9, "scale", f"p9_{tag}_rwc", cfg_name, **extra, **INFLUENCE,
-            **{"loss.consistency": "rwc", "loss.lam": 1.0})
-
-    _check_counts(runs)
+    ids = [r["id"] for r in runs]
+    if len(set(ids)) != len(ids):
+        raise AssertionError("duplicate run ids in the manifest")
 
     for run in runs:
         run.update(status="pending", run_dir=None, claimed_at=None,
                    worker=None, error=None, config_hash=None)
     return {"version": MANIFEST_VERSION, "created": time.time(), "runs": runs}
-
-
-# ---------------------------------------------------------------------------
-# Calibration sweep
-# ---------------------------------------------------------------------------
-#
-# The first A100 batch of priority 1 finished cleanly and sat at chance in every
-# distance bucket: answer-position NLL 2.772 = ln(16) exactly, CE flat from step
-# 200 to 4000, gradient norm decaying to 0.02. The model never learned to
-# retrieve, which makes probe accuracy -- and therefore C1, C2 and C3 --
-# undefined.
-#
-# Two things were established on CPU before writing this sweep:
-#
-#   * The task IS learnable. Walking the difficulty down reaches 100% accuracy
-#     (1 pair / 2 values) and 89% (3 pairs / 16 values) in 400 steps.
-#   * Learning arrives as a phase transition, not as slow convergence. CE is
-#     strictly bimodal -- pinned at the ln(n_values) plateau, or clearly below
-#     it, never in between. At 1500 steps multi-distance arms escaped at step
-#     404 and 656; at 400 steps the same configs were still at chance.
-#
-# So the question is not "does it work" but "where is the transition at real
-# scale". This ladder starts from a configuration that should comfortably learn
-# and walks one factor at a time toward the real grid config, so the first cell
-# that fails names the binding constraint.
-#
-# Every cell uses answer-only CE. Under full-sequence CE the answer is 1 scored
-# position out of 511, so solving retrieval perfectly moves total CE by 0.0054:
-# the gradient carrying the entire task is ~0.2% of the loss and the rest is
-# irreducible filler entropy.
-
-CAL_BASE: Dict[str, Any] = {
-    "data.task": "carrier_copy",
-    "model.window": 16,
-    "model.carrier_gain_seed": 7,
-    "data.loss_on_answer_only": True,
-}
-
-# seq_len must divide global_tokens_per_step (65536), hence 256 rather than 192.
-CAL_CELLS = [
-    # id,      seq,  distances,                        distractors, steps
-    ("a_easy",   256, [64],                              0, 4_000),
-    ("b_distr",  256, [64],                              4, 4_000),
-    ("c_multiD", 256, [64, 96, 128],                     4, 4_000),
-    ("d_long",   512, [64, 128, 256, 384],               4, 4_000),
-    ("e_real",   512, [64, 96, 128, 192, 256, 384],      4, 8_000),
-    # The main grid runs `needle` at W=64, not carrier_copy at W=16, so the
-    # transition has to be located there too.
-    ("f_needle", 512, [8, 16, 32, 48, 64, 96, 128, 192, 256, 384], 4, 8_000),
-]
-
-
-def build_calibration_manifest() -> Dict[str, Any]:
-    runs: List[Dict[str, Any]] = []
-    for cell_id, seq, dists, distractors, steps in CAL_CELLS:
-        name = f"cal_{cell_id}"
-        over: Dict[str, Any] = {
-            "run.name": name,
-            "data.seq_len": seq,
-            "data.distances": dists,
-            "data.n_distractors": distractors,
-            "optim.total_steps": steps,
-            "data.loss_on_answer_only": True,
-        }
-        if cell_id == "f_needle":
-            over["data.task"] = "needle"  # W stays at tiny_synth's 64
-        else:
-            over.update(CAL_BASE)
-        runs.append({
-            "id": name, "priority": 0, "group": "calibration",
-            "config": "tiny_synth.yaml", "overrides": over,
-            "status": "pending", "run_dir": None, "claimed_at": None,
-            "worker": None, "error": None, "config_hash": None,
-        })
-    return {"version": MANIFEST_VERSION, "created": time.time(), "runs": runs}
-
-
-# Counts from SPEC.md section 8. Asserted so an edit to the grid that silently
-# drops a cell fails loudly instead of producing a quietly incomplete paper.
-EXPECTED_COUNTS = {1: 3, 2: 6, 3: 6, 4: 4, 5: 2, 6: 3, 7: 8, 8: 2, 9: 4}
-
-
-def _check_counts(runs: List[Dict[str, Any]]) -> None:
-    got: Dict[int, int] = {}
-    for run in runs:
-        got[run["priority"]] = got.get(run["priority"], 0) + 1
-    if got != EXPECTED_COUNTS:
-        raise AssertionError(f"grid counts {got} do not match SPEC table {EXPECTED_COUNTS}")
-    ids = [r["id"] for r in runs]
-    if len(set(ids)) != len(ids):
-        raise AssertionError("duplicate run ids in the manifest")
 
 
 # ---------------------------------------------------------------------------

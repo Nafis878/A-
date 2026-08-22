@@ -372,30 +372,3 @@ def test_baselines_run_and_differ_in_reach() -> None:
         assert not torch.equal(full(tokens)[0][:, query], full(perturbed)[0][:, query])
 
 
-def test_carrier_gain_makes_read_structure_known_by_construction() -> None:
-    """Zero-gain dimensions must be provably unable to affect anything."""
-    cfg = tiny_cfg(carrier_gain_seed=7, carrier_frac=0.25)
-    torch.manual_seed(0)
-    model = MaglevModel(cfg).double().eval()
-    gain = model.injections[0].carrier_gain
-    assert gain is not None
-    assert torch.all(gain >= 0)
-    assert int((gain > 0).sum()) == round(cfg.carrier_frac * cfg.d_model)
-    for inj in model.injections:
-        torch.testing.assert_close(inj.carrier_gain, gain)  # same structure everywhere
-
-    tokens = torch.randint(0, cfg.vocab_size, (2, SEQ_LEN))
-    memory = random_memory(model, tokens, torch.float64)
-    dead = int((gain == 0).nonzero()[0])
-    live = int((gain > 0).nonzero()[0])
-
-    with torch.no_grad():
-        base, _, _ = model.forward_decoder(tokens, MaglevModel.shift_memory(memory))
-        for dim, expect_change in ((dead, False), (live, True)):
-            bumped = memory.clone()
-            bumped[:, :, dim] += 10.0
-            out, _, _ = model.forward_decoder(tokens, MaglevModel.shift_memory(bumped))
-            changed = (out - base).abs().max().item() > 0
-            assert changed is expect_change, (
-                f"dim {dim} (gain={gain[dim]:.3f}) changed={changed}"
-            )

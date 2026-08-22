@@ -30,12 +30,6 @@ data:
 loss:
   lam: 0.0
   consistency: none
-  influence:
-    estimator: saliency
-    horizon_H: 512
-    refresh_every: 50
-    ema_decay: 0.9
-    detach_local: true
 
 optim:
   lr: 1.0e-3
