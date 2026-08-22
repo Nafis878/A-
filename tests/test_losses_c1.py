@@ -549,3 +549,95 @@ def test_unroll_k_changes_config_identity() -> None:
                     overrides={**base, "loss.unroll_k": 4}, cuda_available=False)
     assert a.config_hash != b.config_hash
     assert a.loss.unroll_k == 1
+
+
+# --------------------------------------------------------------------------
+# Recurrence diagnostics
+# --------------------------------------------------------------------------
+
+from rwc.analysis import (  # noqa: E402
+    diagnose_recurrence,
+    memory_ablation_effect,
+    recurrence_gain,
+)
+
+
+def _tokens(model, n=2, t=32):
+    return torch.randint(0, model.cfg.vocab_size, (n, t))
+
+
+def test_severing_the_read_maps_zeroes_every_readout() -> None:
+    """W_k_rec and W_v_rec are the only route from memory into the network.
+
+    Zeroing them must drive all three diagnostics to their floor -- if any one
+    still registers, it is reading memory through a path that should not exist.
+    """
+    model = _small_model().double()
+    for inj in model.injections:
+        torch.nn.init.zeros_(inj.W_k_rec.weight)
+        torch.nn.init.zeros_(inj.W_v_rec.weight)
+    d = diagnose_recurrence(model, _tokens(model))
+    assert d.ablation_delta == pytest.approx(0.0, abs=1e-9)
+    assert d.rho == pytest.approx(0.0, abs=1e-9)
+    assert not d.is_read and not d.propagates
+    assert "CHANNEL CLOSED" in d.verdict()
+
+
+def test_an_intact_model_reads_and_propagates() -> None:
+    model = _small_model().double()
+    d = diagnose_recurrence(model, _tokens(model))
+    assert d.is_read, "memory has no effect on the output at all"
+    assert d.rho > 0 and d.sigma_max >= d.rho  # sigma_max always bounds rho
+
+
+def test_read_without_write_is_distinguished_from_unused() -> None:
+    """The failure this whole diagnostic exists to catch.
+
+    Memory can be consumed at every position while nothing is carried across
+    steps. Deployed accuracy cannot tell that apart from "memory is unused";
+    ablation and rho together can, so the two must not move as one.
+    """
+    model = _small_model().double()
+    tokens = _tokens(model)
+    with torch.no_grad():
+        mem_in = MaglevModel.shift_memory(model.forward_prefiller(tokens))
+        # Keep the value path (memory still reaches the output) but cut the key
+        # path, which is what carries memory into the next state's computation.
+        for inj in model.injections:
+            torch.nn.init.zeros_(inj.W_k_rec.weight)
+    ablation = memory_ablation_effect(model, tokens, mem_in)
+    assert ablation > 1e-3, "value path was severed too; the probe is not isolating"
+
+
+def test_gain_is_invariant_to_batch_size() -> None:
+    """Only the first sequence is used, so extra batch rows must not change it."""
+    model = _small_model().double()
+    torch.manual_seed(1)
+    tokens = _tokens(model, n=4)
+    with torch.no_grad():
+        mem = MaglevModel.shift_memory(model.forward_prefiller(tokens))
+    a = recurrence_gain(model, tokens, mem, positions=(8,))
+    b = recurrence_gain(model, tokens[:1], mem[:1], positions=(8,))
+    assert a[0] == pytest.approx(b[0], rel=1e-9)
+
+
+def test_scaling_the_read_maps_scales_the_gain() -> None:
+    """rho should track the strength of the recurrent path, not be an artifact."""
+    model = _small_model().double()
+    tokens = _tokens(model)
+    with torch.no_grad():
+        mem = MaglevModel.shift_memory(model.forward_prefiller(tokens))
+    strong = recurrence_gain(model, tokens, mem, positions=(8,))[0]
+    with torch.no_grad():
+        for inj in model.injections:
+            inj.W_k_rec.weight.mul_(0.05)
+            inj.W_v_rec.weight.mul_(0.05)
+    weak = recurrence_gain(model, tokens, mem, positions=(8,))[0]
+    assert weak < strong, f"weakening the read maps did not lower rho ({weak} vs {strong})"
+
+
+def test_diagnostics_do_not_leave_the_model_in_eval_mode() -> None:
+    model = _small_model().double()
+    model.train()
+    diagnose_recurrence(model, _tokens(model))
+    assert model.training, "diagnostic left the model in eval mode"

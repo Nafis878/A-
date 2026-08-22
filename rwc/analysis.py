@@ -50,6 +50,11 @@ __all__ = [
     "wilson_interval",
     "paired_slope_test",
     "SlopeResult",
+    "recurrence_gain",
+    "memory_ablation_effect",
+    "gate_statistics",
+    "RecurrenceDiagnostics",
+    "diagnose_recurrence",
 ]
 
 IGNORE_INDEX = -100
@@ -349,3 +354,127 @@ def _bootstrap_ci(values: Sequence[float], *, seed: int = 0, n: int = 20000):
         sum(values[rng.randrange(k)] for _ in range(k)) / k for _ in range(n)
     )
     return (means[int(0.025 * n)], means[int(0.975 * n)])
+
+
+# --------------------------------------------------------------------------
+# Recurrence diagnostics
+# --------------------------------------------------------------------------
+#
+# Deployed probe accuracy is a noisy readout: it needs the whole task to work,
+# it costs a sequential rollout, and at small scale its seed-to-seed spread
+# swamps every effect. These three quantities are deterministic given a
+# checkpoint, cost one forward pass (or d backward passes for the exact
+# Jacobian), and localise *where* the memory pathway fails:
+#
+#   recurrence_gain        rho(dm_t / dm_{t-1}) -- is memory WRITTEN forward?
+#   memory_ablation_effect how much do outputs move if memory is zeroed --
+#                          is memory READ at all?
+#   gate_statistics        Eq. 7's g_rec vs g_loc -- is the channel open?
+#
+# The failure mode they were built to catch: memory can be read while
+# rho(J) ~ 0, i.e. consumed at every position but never carried across steps.
+# Accuracy cannot distinguish that from "memory is unused"; these can.
+
+
+class RecurrenceDiagnostics(NamedTuple):
+    rho: float            # spectral radius of dm_t/dm_{t-1}
+    sigma_max: float      # largest singular value of the same Jacobian
+    ablation_delta: float # max |logit| change when memory is zeroed
+    g_rec: float          # mean recurrent gate (Eq. 7)
+    g_loc: float          # mean local gate
+
+    @property
+    def propagates(self) -> bool:
+        """Is anything written forward through the memory chain?"""
+        return self.rho > 0.05
+
+    @property
+    def is_read(self) -> bool:
+        """Is memory consumed at all, whether or not it is propagated?"""
+        return self.ablation_delta > 1e-2
+
+    def verdict(self) -> str:
+        if not self.is_read:
+            return "CHANNEL CLOSED: memory neither read nor propagated"
+        if not self.propagates:
+            return "WRITE SEVERED: memory is read but not carried across steps"
+        return "chain live"
+
+
+def recurrence_gain(
+    model: MaglevModel,
+    tokens: Tensor,
+    mem_in: Tensor,
+    *,
+    positions: Sequence[int] = (),
+) -> Tuple[float, float]:
+    """Spectral radius and largest singular value of ``dm_t / dm_{t-1}``.
+
+    The exact Jacobian, formed column by column -- ``d`` is small enough at the
+    scales this is used at, and an estimate would blur exactly the distinction
+    (rho ~ 0.01 vs rho ~ 0.7) the diagnostic exists to make.
+
+    ``rho >= 1`` means errors compound through the recurrence and one-step
+    consistency cannot bound the deployed deviation. ``rho ~ 0`` means the
+    opposite failure and the one actually observed: nothing is carried at all.
+    """
+    t_len = tokens.shape[1]
+    if not positions:
+        positions = [t_len // 4, t_len // 2, 3 * t_len // 4]
+
+    # One sequence at a time: batching would build a block-diagonal Jacobian
+    # whose off-diagonal blocks are known to be zero, at B times the cost.
+    tokens = tokens[:1]
+    mem_in = mem_in[:1]
+
+    rhos, sigmas = [], []
+    for t in positions:
+        base = mem_in.clone()
+
+        def step(v: Tensor) -> Tensor:
+            mi = base.clone()
+            mi[:, t] = v.unsqueeze(0)
+            _, m, _ = model.forward_decoder(tokens, mi)
+            return m[0, t]
+
+        jac = torch.autograd.functional.jacobian(step, base[0, t].clone())
+        rhos.append(float(torch.linalg.eigvals(jac).abs().max()))
+        sigmas.append(float(torch.linalg.svdvals(jac).max()))
+    return sum(rhos) / len(rhos), sum(sigmas) / len(sigmas)
+
+
+@torch.no_grad()
+def memory_ablation_effect(model: MaglevModel, tokens: Tensor, mem_in: Tensor) -> float:
+    """Largest logit change when the memory input is replaced by zeros."""
+    live, _, _ = model.forward_decoder(tokens, mem_in)
+    dead, _, _ = model.forward_decoder(tokens, torch.zeros_like(mem_in))
+    return float((live - dead).abs().max())
+
+
+@torch.no_grad()
+def gate_statistics(model: MaglevModel, tokens: Tensor, mem_in: Tensor) -> Tuple[float, float]:
+    """Mean of Eq. 7's gates, ``(g_rec, g_loc)``, averaged over layers."""
+    out = model.forward_decoder(tokens, mem_in, need_mass=True)
+    g_rec = torch.stack([a.g_rec.mean() for a in out[2]]).mean()
+    h = model.embed(tokens)
+    g_loc = torch.stack([
+        (2 * torch.sigmoid(model.injections[i].G_loc(
+            model.decoder_blocks[i].attn_norm(h)))).mean()
+        for i in range(model.cfg.n_layers)
+    ]).mean()
+    return float(g_rec), float(g_loc)
+
+
+def diagnose_recurrence(model: MaglevModel, tokens: Tensor) -> RecurrenceDiagnostics:
+    """All three readouts from one teacher-forced pass."""
+    was_training = model.training
+    model.eval()
+    try:
+        with torch.no_grad():
+            mem_in = MaglevModel.shift_memory(model.forward_prefiller(tokens))
+        rho, sigma = recurrence_gain(model, tokens, mem_in)
+        ablation = memory_ablation_effect(model, tokens, mem_in)
+        g_rec, g_loc = gate_statistics(model, tokens, mem_in)
+    finally:
+        model.train(was_training)
+    return RecurrenceDiagnostics(rho, sigma, ablation, g_rec, g_loc)
