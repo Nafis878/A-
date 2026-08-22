@@ -359,11 +359,52 @@ def mark(manifest_path: Path, run_id: str, **fields: Any) -> None:
 def execute(run: Dict[str, Any], *, results_dir: Path) -> Dict[str, Any]:
     cfg = load_config(CONFIGS / run["config"], overrides=run["overrides"])
     run_dir = Path(run["run_dir"] or results_dir / run["id"])
+    _retire_stale_checkpoint(run_dir, cfg.config_hash)
     trainer = Trainer(cfg, run_dir=run_dir)
     trainer.maybe_resume()  # zero manual intervention after a disconnect
     result = trainer.run()
     _atomic_write_text(run_dir / "result.json", json.dumps(result, indent=2))
     return result
+
+
+def _retire_stale_checkpoint(run_dir: Path, want_hash: str) -> None:
+    """Move aside a checkpoint written by a different config, and start clean.
+
+    Re-running with --init after a config change gives every cell a new hash
+    while its run directory still holds the *old* checkpoint. Trainer.maybe_resume
+    correctly refuses to load it -- resuming into the wrong config would silently
+    corrupt a grid cell -- but the run then fails instead of starting fresh, and
+    the stale result.json stays on disk looking like a completed run. That
+    happened to all three priority-1 cells on the first headline batch: their
+    artifacts were from the previous commit and were mistaken for new results.
+
+    The old files are renamed rather than deleted, so nothing is destroyed.
+    """
+    ckpt = run_dir / "checkpoint.pt"
+    if not ckpt.exists():
+        return
+    try:
+        import torch
+
+        have = torch.load(ckpt, map_location="cpu", weights_only=False).get("config_hash")
+    except Exception:
+        have = None
+    if have == want_hash:
+        return
+
+    stamp = time.strftime("%Y%m%d-%H%M%S")
+    retired = run_dir / f"stale-{have or 'unreadable'}-{stamp}"
+    retired.mkdir(parents=True, exist_ok=True)
+    for name in ("checkpoint.pt", "result.json", "metrics.csv", "heartbeat"):
+        src = run_dir / name
+        if src.exists():
+            src.rename(retired / name)
+    print(
+        f"[queue] {run_dir.name}: checkpoint was written by config "
+        f"{(have or '?')[:12]}, this cell wants {want_hash[:12]}. "
+        f"Retired the old artifacts to {retired.name}/ and starting clean.",
+        flush=True,
+    )
 
 
 def work(manifest_path: Path, results_dir: Path, *, max_runs: Optional[int] = None) -> int:

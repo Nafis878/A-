@@ -611,3 +611,42 @@ def test_grid_uses_answer_only_loss(tmp_path: Path) -> None:
             assert not cfg.data.loss_on_answer_only, (
                 f"{run['id']} is an LM run; full-sequence CE is correct there"
             )
+
+
+def test_stale_checkpoint_is_retired_not_fatal(tmp_path: Path) -> None:
+    """A config change plus a leftover run dir must start clean, not fail.
+
+    This is what silently produced three stale 'results' in the first headline
+    batch: --init gave every cell a new hash, the old checkpoints were still on
+    Drive, maybe_resume refused them, the runs failed, and the previous
+    result.json files stayed behind looking like completed runs.
+    """
+    q = _queue()
+    run_dir = tmp_path / "cell"
+    a = Trainer(tiny_config(run_dir.parent, **{"run.name": "cell"}),
+                device=torch.device("cpu"))
+    a.run(max_steps=2, quiet=True)
+    a.save_checkpoint()
+    assert (run_dir / "checkpoint.pt").exists()
+    old_hash = a.cfg.config_hash
+
+    q._retire_stale_checkpoint(run_dir, "a" * 64)
+    assert not (run_dir / "checkpoint.pt").exists(), "stale checkpoint still in place"
+    retired = [p for p in run_dir.iterdir() if p.name.startswith("stale-")]
+    assert len(retired) == 1
+    # Renamed, never deleted -- nothing is destroyed.
+    assert (retired[0] / "checkpoint.pt").exists()
+    assert old_hash[:12] in retired[0].name
+
+
+def test_matching_checkpoint_is_left_alone(tmp_path: Path) -> None:
+    """A normal disconnect-resume must not be mistaken for a stale cell."""
+    q = _queue()
+    run_dir = tmp_path / "cell"
+    a = Trainer(tiny_config(tmp_path, **{"run.name": "cell"}), device=torch.device("cpu"))
+    a.run(max_steps=2, quiet=True)
+    a.save_checkpoint()
+
+    q._retire_stale_checkpoint(run_dir, a.cfg.config_hash)
+    assert (run_dir / "checkpoint.pt").exists()
+    assert not [p for p in run_dir.iterdir() if p.name.startswith("stale-")]
