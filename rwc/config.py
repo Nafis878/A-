@@ -456,6 +456,16 @@ class OptimConfig:
     precision: Literal["auto", "bf16", "fp16", "fp32"] = "auto"
     compile: bool = False  # default off: compile time is punishing on Colab
 
+    # "parallel" is Maglev as published: one teacher-forced pass, decoder fed
+    # the prefiller's memory. The recurrent chain it is DEPLOYED on is then
+    # never exercised during training, which is why deployed probe accuracy has
+    # never risen above chance in any configuration measured (best 0.077 vs
+    # 0.0625 over 26 runs). "bptt" trains through the recurrence instead, as a
+    # positive control: what the chain achieves when it is actually trained.
+    # Costs T sequential steps per forward, so it is only affordable on short
+    # sequences.
+    train_mode: Literal["parallel", "bptt"] = "parallel"
+
     def validate(self, data: DataConfig, *, cuda_available: bool) -> None:
         if self.lr <= 0:
             raise ConfigError("optim.lr must be positive")
@@ -488,6 +498,13 @@ class OptimConfig:
                     f"divisible by micro_batch*seq_len={per_micro}; grad accumulation "
                     "would not hit the target token count exactly"
                 )
+        if self.train_mode not in ("parallel", "bptt"):
+            raise ConfigError(f"unknown optim.train_mode {self.train_mode!r}")
+        if self.train_mode == "bptt" and data.seq_len > 128:
+            raise ConfigError(
+                f"optim.train_mode='bptt' with seq_len={data.seq_len} runs "
+                f"{data.seq_len} sequential steps per forward; cap it at 128"
+            )
         if self.precision not in ("auto", "bf16", "fp16", "fp32"):
             raise ConfigError(f"unknown optim.precision {self.precision!r}")
         if self.precision == "fp16" and not cuda_available:

@@ -165,6 +165,27 @@ def forward_logits(model: nn.Module, tokens: Tensor):
     return logits, h, None
 
 
+def bptt_logits(model: nn.Module, tokens: Tensor):
+    """Train through the recurrence: the decoder consumes its OWN memory.
+
+    Maglev's published objective trains only the teacher-forced pass, so the
+    recurrent chain the model is deployed on is never exercised. This runs the
+    deployed computation with the autograd graph retained, making the chain
+    itself trainable. It is the positive control the project has lacked: what
+    the memory chain achieves when the path being evaluated is the path being
+    optimised.
+
+    Returns ``(logits, m, m_prime)`` to match ``forward_logits``. ``m_prime`` is
+    None: there is no prefiller pass here, so the consistency term does not
+    apply and the trainer must not try to compute it.
+    """
+    if isinstance(model, MaglevModel):
+        out = model.forward_recurrent(tokens, keep_graph=True)
+        return out.logits, out.m, None
+    logits, h = model(tokens)
+    return logits, h, None
+
+
 def deployed_logits(model: nn.Module, tokens: Tensor) -> Tensor:
     """Logits from the model as actually *deployed* (Eq. 10).
 
@@ -310,8 +331,11 @@ class Trainer:
             batch = self._micro_batch(self.step, micro)
             tokens = batch.tokens.to(self.device)
             targets = batch.targets.to(self.device)
+            forward = (
+                bptt_logits if self.cfg.optim.train_mode == "bptt" else forward_logits
+            )
             with self._autocast():
-                logits, m, m_prime = forward_logits(self.model, tokens)
+                logits, m, m_prime = forward(self.model, tokens)
                 ce = cross_entropy(logits, targets)
                 cons = self._consistency_terms(tokens, m, m_prime)
                 prop = self._propagation(tokens, m_prime)
