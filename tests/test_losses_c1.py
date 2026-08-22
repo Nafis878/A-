@@ -641,3 +641,34 @@ def test_diagnostics_do_not_leave_the_model_in_eval_mode() -> None:
     model.train()
     diagnose_recurrence(model, _tokens(model))
     assert model.training, "diagnostic left the model in eval mode"
+
+
+def test_a_constant_memory_trajectory_makes_consistency_exactly_zero() -> None:
+    """The degenerate optimum, stated as a test.
+
+    lam * ||m - m'|| is globally minimised by ANY constant trajectory, which
+    carries no information. Nothing in the objective excludes it -- which is
+    why trained models collapse into it, prefiller spread falling ~1800x below
+    random init at lam >= 0.3.
+    """
+    const = torch.randn(1, 1, 16).expand(4, 12, 16).contiguous()
+    for kind, kw in [("uniform", {}), ("rwc", {"weights": torch.rand(16)})]:
+        assert float(consistency_loss(const, const.clone(), kind=kind, **kw)) == 0.0
+    # And it beats any informative trajectory that is not exactly matched.
+    informative = torch.randn(4, 12, 16)
+    assert float(consistency_loss(informative, const, kind="uniform")) > 0.0
+
+
+def test_memory_information_detects_a_collapsed_trajectory() -> None:
+    from rwc.analysis import memory_information
+
+    model = _small_model().double()
+    tokens = torch.randint(0, model.cfg.vocab_size, (2, 48))
+    live = memory_information(model, tokens)
+    assert live["spread"] > 1e-3, "a fresh model should have a varying trajectory"
+
+    # Force the prefiller output to a constant by zeroing the final norm gain.
+    with torch.no_grad():
+        model.prefiller_norm.weight.zero_()
+    dead = memory_information(model, tokens)
+    assert dead["spread"] < live["spread"] / 100

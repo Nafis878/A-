@@ -38,7 +38,14 @@ class ConfigError(ValueError):
 
 # Fields excluded from the config hash: they name *where* a run writes, not what
 # it computes, so two runs differing only in these are scientifically identical.
-_HASH_EXCLUDED_RUN_FIELDS = frozenset({"out_dir", "drive_dir", "wandb", "name"})
+# Bookkeeping only: how often we checkpoint or log changes nothing about what
+# is computed (resume is exact), so two runs differing only in these are the
+# same experiment and must share a hash -- otherwise turning checkpointing on
+# orphans every checkpoint already written.
+_HASH_EXCLUDED_RUN_FIELDS = frozenset({
+    "out_dir", "drive_dir", "wandb", "name",
+    "ckpt_every", "log_every", "eval_every", "heartbeat_secs",
+})
 
 _LAYER_KINDS = frozenset({"S", "L"})
 

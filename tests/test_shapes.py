@@ -261,6 +261,12 @@ def test_hash_changes_with_scientific_fields(override: Dict[str, Any]) -> None:
         {"run.drive_dir": "/content/drive/MyDrive/rwc"},
         {"run.name": "renamed"},
         {"run.wandb": True},
+        # Checkpoint/log cadence changes nothing computed -- resume is exact --
+        # so enabling checkpointing must not orphan existing checkpoints.
+        {"run.ckpt_every": 7},
+        {"run.log_every": 3},
+        {"run.eval_every": 11},
+        {"run.heartbeat_secs": 5},
     ],
 )
 def test_hash_ignores_bookkeeping_fields(override: Dict[str, Any]) -> None:

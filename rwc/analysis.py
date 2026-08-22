@@ -55,6 +55,8 @@ __all__ = [
     "gate_statistics",
     "RecurrenceDiagnostics",
     "diagnose_recurrence",
+    "prefiller_locality",
+    "memory_information",
 ]
 
 IGNORE_INDEX = -100
@@ -478,3 +480,86 @@ def diagnose_recurrence(model: MaglevModel, tokens: Tensor) -> RecurrenceDiagnos
     finally:
         model.train(was_training)
     return RecurrenceDiagnostics(rho, sigma, ablation, g_rec, g_loc)
+
+
+@torch.no_grad()
+def prefiller_locality(
+    model: MaglevModel,
+    tokens: Tensor,
+    *,
+    n_probes: int = 16,
+    seed: int = 0,
+) -> Dict[str, float]:
+    """How much of the prefiller's memory depends on tokens outside the window.
+
+    This measures the *premise* of the degenerate optimum. The consistency term
+    can reach zero with the memory channel switched off precisely when the
+    prefiller's trajectory is computable from local context alone: a
+    sliding-window decoder can then reproduce ``m'_t`` from the last W tokens
+    with ``g_rec = 0``, satisfying the objective while carrying nothing across
+    steps. If instead ``m'_t`` genuinely depends on distant tokens, that escape
+    is unavailable and the consistency term must be paid for with real memory.
+
+    Perturbs a token at distance > W before position t and reports the change in
+    ``m'_t``, normalised by the change from perturbing a token *inside* the
+    window. A ratio near 0 means the prefiller has gone local.
+    """
+    g = torch.Generator().manual_seed(seed)
+    window = model.cfg.window
+    t_len = tokens.shape[1]
+    was_training = model.training
+    model.eval()
+    try:
+        base = model.forward_prefiller(tokens)
+        far_deltas, near_deltas = [], []
+        for _ in range(n_probes):
+            t = int(torch.randint(2 * window + 2, t_len, (1,), generator=g))
+            far = int(torch.randint(0, t - window, (1,), generator=g))
+            near = int(torch.randint(max(0, t - window + 1), t + 1, (1,), generator=g))
+            for pos, bucket in ((far, far_deltas), (near, near_deltas)):
+                pert = tokens.clone()
+                pert[:, pos] = (pert[:, pos] + 1) % model.cfg.vocab_size
+                m2 = model.forward_prefiller(pert)
+                bucket.append(float((m2[:, t] - base[:, t]).norm(dim=-1).mean()))
+    finally:
+        model.train(was_training)
+
+    far = sum(far_deltas) / len(far_deltas)
+    near = sum(near_deltas) / len(near_deltas)
+    return {
+        "far_delta": far,
+        "near_delta": near,
+        # ~0 => the prefiller ignores everything outside the window, so the
+        # degenerate zero-consistency solution is available to the decoder.
+        "far_over_near": far / max(near, 1e-12),
+    }
+
+
+@torch.no_grad()
+def memory_information(model: MaglevModel, tokens: Tensor) -> Dict[str, float]:
+    """How much information the prefiller's memory trajectory actually carries.
+
+    The consistency term ``lam * ||m_t - m'_t||`` attains its global minimum,
+    zero, at ANY constant trajectory ``m_t = m'_t = c``. That solution carries
+    no information and nothing in the objective forbids it; only cross-entropy
+    opposes it, and only to the extent that the task needs memory at all.
+
+    ``spread`` is the per-position standard deviation of ``m'`` relative to its
+    own norm, so a large constant offset does not disguise a collapsed
+    trajectory. Measured against a random-init control it falls by ~1800x at
+    lambda >= 0.3 (0.071 -> 0.00004), which is the degenerate optimum being
+    found rather than the model failing to start.
+    """
+    was_training = model.training
+    model.eval()
+    try:
+        m_prime = model.forward_prefiller(tokens)
+    finally:
+        model.train(was_training)
+    scale = m_prime.norm(dim=-1).mean().clamp_min(1e-12)
+    centred = (m_prime[0] - m_prime[0].mean(dim=0)).double()
+    return {
+        "spread": float(m_prime.std(dim=1).mean() / scale),
+        "norm": float(scale),
+        "rank": float(torch.linalg.matrix_rank(centred, rtol=1e-3)),
+    }
