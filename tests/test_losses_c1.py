@@ -419,3 +419,58 @@ def test_log_axis_is_the_default_and_changes_the_slope() -> None:
     log = paired_slope_test(DIST, c, t, n_permutations=500)
     lin = paired_slope_test(DIST, c, t, n_permutations=500, log_x=False)
     assert log.slope_mean != pytest.approx(lin.slope_mean)
+
+
+# --------------------------------------------------------------------------
+# Stop-gradient on the distillation target
+# --------------------------------------------------------------------------
+
+
+def test_detach_target_blocks_gradient_to_the_prefiller_only(diff_pair) -> None:
+    """With the pull symmetric, high lambda can be satisfied by degrading m'.
+
+    Observed on the A100 headline batch: at lambda 0.1 the prefiller solved the
+    memory-only buckets at 0.97 while the decoder inherited 0.16; at lambda 1.0
+    both collapsed to 0.109. detach_target makes the prefiller a fixed teacher
+    for this term so the decoder must chase it.
+    """
+    m, m_prime = diff_pair
+    for detach, expect_target_grad in ((False, True), (True, False)):
+        a = m.clone().requires_grad_(True)
+        b = m_prime.clone().requires_grad_(True)
+        consistency_loss(a, b, kind="uniform", detach_target=detach).backward()
+        assert a.grad is not None and float(a.grad.abs().sum()) > 0
+        got = b.grad is not None and float(b.grad.abs().sum()) > 0
+        assert got is expect_target_grad
+
+
+def test_detach_target_does_not_change_the_loss_value(diff_pair) -> None:
+    """It is a gradient-routing change, not a different objective."""
+    m, m_prime = diff_pair
+    torch.testing.assert_close(
+        consistency_loss(m, m_prime, kind="uniform", detach_target=True),
+        consistency_loss(m, m_prime, kind="uniform", detach_target=False),
+    )
+
+
+@pytest.mark.parametrize("kind,kw", [
+    ("rwc", {"weights": torch.rand(16)}),
+    ("mask_topk", {"mask": influence_mask(torch.rand(16), "mask_topk", 50.0)}),
+])
+def test_detach_target_applies_to_every_consistency_kind(kind, kw, diff_pair) -> None:
+    m, m_prime = diff_pair
+    b = m_prime.clone().requires_grad_(True)
+    consistency_loss(m.clone().requires_grad_(True), b, kind=kind,
+                     detach_target=True, **kw).backward()
+    assert b.grad is None or float(b.grad.abs().sum()) == 0.0
+
+
+def test_detach_target_is_part_of_the_config_identity() -> None:
+    """Two arms differing only in this must be distinct manifest cells."""
+    base = {"loss.consistency": "uniform", "loss.lam": 1.0}
+    off = load_config(REPO_ROOT / "configs" / "tiny_synth.yaml",
+                      overrides=base, cuda_available=False)
+    on = load_config(REPO_ROOT / "configs" / "tiny_synth.yaml",
+                     overrides={**base, "loss.detach_target": True}, cuda_available=False)
+    assert off.config_hash != on.config_hash
+    assert off.loss.detach_target is False and on.loss.detach_target is True
