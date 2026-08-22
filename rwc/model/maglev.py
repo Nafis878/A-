@@ -159,6 +159,7 @@ class MaglevModel(nn.Module):
         self.mem_gate = (
             nn.Linear(cfg.d_model, cfg.d_model) if cfg.memory_residual else None
         )
+        self._gate_bias_init = cfg.memory_gate_bias
 
         if cfg.tie_embeddings:
             self.lm_head = None  # uses embed.weight
@@ -167,6 +168,15 @@ class MaglevModel(nn.Module):
 
         self._mask_cache: Dict[Tuple[str, int, str], Tensor] = {}
         self.apply(self._init_weights)
+
+        # Forget-gate bias INITIALISATION, not a fixed additive constant. Adding
+        # it at every forward pass would pin the gate at a value the model can
+        # never move off, making it a hyperparameter we introduced. As an init it
+        # is the standard LSTM forget-gate trick -- start near the identity so
+        # maintenance is free, then let gradient descent choose the balance
+        # between remembering and write bandwidth.
+        if self.mem_gate is not None:
+            nn.init.constant_(self.mem_gate.bias, self._gate_bias_init)
 
     # ---- construction helpers --------------------------------------------
 
@@ -268,7 +278,7 @@ class MaglevModel(nn.Module):
             # m_{t-1} by construction (Eq. 3's shift), so this is exactly a
             # GRU-style convex update on the memory, and it holds identically in
             # the parallel and recurrent paths.
-            f = torch.sigmoid(self.mem_gate(h) + self.cfg.memory_gate_bias)
+            f = torch.sigmoid(self.mem_gate(h))
             m = f * mem_in + (1.0 - f) * m
         return self._head(m), m, tuple(aux)
 

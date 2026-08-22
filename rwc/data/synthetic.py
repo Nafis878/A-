@@ -87,7 +87,7 @@ class SyntheticGenerator:
         model: ModelConfig,
         *,
         seed: int = 0,
-        n_distractors: int = 4,
+        n_distractors: Optional[int] = None,
     ) -> None:
         self.task = TASK_ALIASES.get(data.task or "", data.task or "")
         if self.task not in ("needle", "two_hop", "delayed_recall"):
@@ -95,7 +95,13 @@ class SyntheticGenerator:
         self.data = data
         self.model = model
         self.seed = seed
-        self.n_distractors = n_distractors
+        # Default to the config rather than a literal. A caller that omitted this
+        # silently evaluated on a harder distribution (4 distractors) than the
+        # model trained on, which produces plausible wrong numbers rather than
+        # an error -- it cost one bogus verification of the headline result.
+        self.n_distractors = (
+            data.n_distractors if n_distractors is None else n_distractors
+        )
         self.vocab = SyntheticVocab.from_config(data)
         self.seq_len = data.seq_len
         self.distances = list(data.distances)

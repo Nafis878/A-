@@ -437,3 +437,22 @@ def test_delayed_recall_generator_rejects_reachable_distances() -> None:
         SyntheticGenerator(bad, cfg.model, seed=0)
 
 
+
+
+def test_generator_takes_distractor_count_from_the_config() -> None:
+    """Omitting n_distractors must not silently change the task difficulty.
+
+    It used to default to a literal 4, so an evaluation that did not pass it ran
+    a harder distribution than the model trained on -- returning plausible wrong
+    numbers instead of an error.
+    """
+    from rwc.data.synthetic import SyntheticGenerator
+
+    cfg = _cuda_free(_mutated(data__n_distractors=0))
+    assert SyntheticGenerator(cfg.data, cfg.model, seed=0).n_distractors == 0
+    cfg7 = _cuda_free(_mutated(data__n_distractors=7))
+    assert SyntheticGenerator(cfg7.data, cfg7.model, seed=0).n_distractors == 7
+    # An explicit argument still wins, for callers that mean it.
+    assert SyntheticGenerator(
+        cfg.data, cfg.model, seed=0, n_distractors=3
+    ).n_distractors == 3

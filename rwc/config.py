@@ -103,9 +103,16 @@ class ModelConfig:
     #
     # memory_residual makes maintenance the default instead of something to be
     # learned:   m_t = f * m_{t-1} + (1 - f) * decoder_norm(h_t),
-    # with f = sigmoid(W_f h_t + bias). memory_gate_bias > 0 starts f near 1, so
-    # the recurrence begins at approximately the identity and the model only has
-    # to learn when to WRITE, not how to remember.
+    # with f = sigmoid(W_f h_t).
+    #
+    # memory_gate_bias INITIALISES that gate's bias; it is not added at every
+    # forward pass. Adding it would pin the gate where the model cannot move
+    # off it, which makes it a hyperparameter we introduced -- and a fixed
+    # b=4.0 saturates the channel (only ~2% of the state can change per step,
+    # so there is no write bandwidth and deployed accuracy returns to chance).
+    # As an initialisation it is instead the standard LSTM forget-gate trick:
+    # start near the identity, then let training pick the balance between
+    # remembering and writing.
     memory_residual: bool = False
     memory_gate_bias: float = 2.0
 
