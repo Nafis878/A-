@@ -361,6 +361,16 @@ class LossConfig:
     # prefiller solved the memory-only buckets at 0.97 while the decoder got
     # 0.16; at lambda 1.0 both sat at 0.109. False reproduces Maglev as written.
     detach_target: bool = False
+    # Closed-loop unroll depth (CL-RWC). k=1 is Maglev exactly: one parallel
+    # pass, decoder fed the prefiller's memory. k>1 iterates that pass, feeding
+    # back the decoder's OWN previous iterate, which reproduces the true closed
+    # loop exactly for the first k positions (verified to 0.0 in fp64) while
+    # staying parallel. Maglev trains only the one-step residual
+    # e_t = m_t - m'_t, but the deployed error obeys d_t = e_t + J_t d_{t-1};
+    # controlling e says nothing about its amplification through J.
+    unroll_k: int = 1
+    # Weight on the closed-loop iterates relative to the k=1 term.
+    unroll_weight: float = 1.0
     influence: InfluenceConfig = field(default_factory=InfluenceConfig)
 
     def validate(self, model: ModelConfig) -> None:
@@ -389,6 +399,14 @@ class LossConfig:
             raise ConfigError(
                 f"loss.mask_k_pct is set but consistency={self.consistency!r} "
                 "does not use a mask"
+            )
+        if self.unroll_k < 1:
+            raise ConfigError("loss.unroll_k must be >= 1 (1 = Maglev's single pass)")
+        if self.unroll_weight < 0:
+            raise ConfigError("loss.unroll_weight must be non-negative")
+        if self.unroll_k > 1 and self.consistency == "none":
+            raise ConfigError(
+                "loss.unroll_k > 1 has no effect without a consistency loss"
             )
         if self.consistency in _INFLUENCE_KINDS:
             self.influence.validate(model)

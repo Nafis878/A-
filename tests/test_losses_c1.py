@@ -474,3 +474,78 @@ def test_detach_target_is_part_of_the_config_identity() -> None:
                      overrides={**base, "loss.detach_target": True}, cuda_available=False)
     assert off.config_hash != on.config_hash
     assert off.loss.detach_target is False and on.loss.detach_target is True
+
+
+# --------------------------------------------------------------------------
+# CL-RWC: closed-loop unrolling by Jacobi iteration
+# --------------------------------------------------------------------------
+
+
+def test_jacobi_iterate_equals_the_closed_loop_for_the_first_k_positions() -> None:
+    """The result the whole method rests on.
+
+    Maglev's training pass feeds mem_in_t = m'_{t-1} in ONE parallel pass, while
+    inference feeds m_{t-1}. Iterating that pass and feeding back the previous
+    iterate's memory reproduces the true closed loop exactly for t < k, in k
+    parallel passes rather than T sequential steps -- so closed-loop error can be
+    trained against without giving up parallel training.
+    """
+    model = _small_model().double()
+    tokens = torch.randint(0, model.cfg.vocab_size, (3, 40))
+    with torch.no_grad():
+        truth = model.forward_recurrent(tokens).m
+        prev = model.forward_prefiller(tokens)
+        for k in range(1, 7):
+            _, prev, _ = model.forward_decoder(tokens, MaglevModel.shift_memory(prev))
+            head = (prev[:, :k] - truth[:, :k]).abs().max().item()
+            assert head == 0.0, f"iterate {k} differs from the closed loop by {head:.2e}"
+    # ... and it is genuinely still wrong beyond k, so the test is not vacuous.
+    assert (prev - truth).abs().max().item() > 0
+
+
+def test_unroll_k_one_is_exactly_maglev(tmp_path: Path) -> None:
+    """k=1 must reproduce the published objective bit-for-bit."""
+    from rwc.train import Trainer
+
+    base = {
+        "loss.consistency": "uniform", "loss.lam": 1.0,
+        "model.d_model": 32, "model.n_layers": 2, "model.n_heads": 4,
+        "model.n_kv_heads": 2, "model.window": 8, "model.max_seq_len": 64,
+        "model.prefiller_pattern": "SL", "model.decoder_pattern": "SS",
+        "data.seq_len": 64, "data.distances": [4, 8, 16],
+        "data.loss_on_answer_only": True,
+        "optim.total_steps": 3, "optim.warmup": 1,
+        "optim.global_tokens_per_step": 4 * 64, "optim.micro_batch": 2,
+        "run.out_dir": str(tmp_path), "run.log_every": 10**6,
+    }
+    traces = {}
+    for k in (1, 2):
+        cfg = load_config(REPO_ROOT / "configs" / "tiny_synth.yaml",
+                          overrides={**base, "loss.unroll_k": k, "run.name": f"k{k}"},
+                          cuda_available=False)
+        t = Trainer(cfg, device=torch.device("cpu"))
+        t.run(quiet=True)
+        traces[k] = [m.consistency for m in t.history]
+    assert traces[1] != traces[2], "unroll_k had no effect on the objective"
+
+
+def test_unroll_k_is_validated() -> None:
+    for bad, msg in [({"loss.unroll_k": 0}, "unroll_k"),
+                     ({"loss.unroll_weight": -1.0}, "unroll_weight")]:
+        with pytest.raises(ConfigError, match=msg):
+            load_config(REPO_ROOT / "configs" / "tiny_synth.yaml",
+                        overrides={"loss.consistency": "uniform", "loss.lam": 1.0, **bad},
+                        cuda_available=False)
+    with pytest.raises(ConfigError, match="no effect"):
+        load_config(REPO_ROOT / "configs" / "tiny_synth.yaml",
+                    overrides={"loss.unroll_k": 4}, cuda_available=False)
+
+
+def test_unroll_k_changes_config_identity() -> None:
+    base = {"loss.consistency": "uniform", "loss.lam": 1.0}
+    a = load_config(REPO_ROOT / "configs" / "tiny_synth.yaml", overrides=base,
+                    cuda_available=False)
+    b = load_config(REPO_ROOT / "configs" / "tiny_synth.yaml",
+                    overrides={**base, "loss.unroll_k": 4}, cuda_available=False)
+    assert a.config_hash != b.config_hash
+    assert a.loss.unroll_k == 1

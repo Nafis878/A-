@@ -309,7 +309,7 @@ class Trainer:
             with self._autocast():
                 logits, m, m_prime = forward_logits(self.model, tokens)
                 ce = cross_entropy(logits, targets)
-                cons = self._consistency(m, m_prime)
+                cons = self._consistency_terms(tokens, m, m_prime)
                 loss = ce + self.cfg.loss.lam * cons
             self.scaler.scale(loss / self.accum).backward()
             ce_total += float(ce.detach()) / self.accum
@@ -359,6 +359,31 @@ class Trainer:
             m, m_prime, kind=kind, weights=weights, mask=mask,
             detach_target=self.cfg.loss.detach_target,
         )
+
+    def _consistency_terms(
+        self, tokens: Tensor, m: Tensor, m_prime: Optional[Tensor]
+    ) -> Tensor:
+        """Maglev's one-step term, plus the closed-loop iterates when k > 1.
+
+        Iterate j feeds back the decoder's own memory from iterate j-1, which is
+        exactly the closed loop for the first j positions. The fed-back memory is
+        *detached*: the objective is "recover the target from the state you
+        actually produced", so each pass carries a one-step gradient and the
+        graph does not deepen with k. That keeps the cost k forward passes and
+        the memory cost flat, and it is the same truncation scheduled sampling
+        makes -- the difference is that this stays parallel.
+        """
+        k = self.cfg.loss.unroll_k
+        total = self._consistency(m, m_prime)
+        if k == 1 or m_prime is None or self.cfg.loss.lam == 0:
+            return total
+
+        prev = m
+        for _ in range(2, k + 1):
+            mem_in = MaglevModel.shift_memory(prev.detach())
+            _, prev, _ = self.model.forward_decoder(tokens, mem_in)
+            total = total + self.cfg.loss.unroll_weight * self._consistency(prev, m_prime)
+        return total / (1.0 + (k - 1) * self.cfg.loss.unroll_weight)
 
     def _mask_for_step(self) -> Tensor:
         """Top-k / bottom-k track the EMA; random-k is drawn once and kept."""
