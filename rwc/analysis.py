@@ -132,10 +132,18 @@ class RecurrenceDiagnostics(NamedTuple):
         return self.ablation_delta > 1e-2
 
     def verdict(self) -> str:
+        """Coarse label from the linearised readouts.
+
+        "WRITE SEVERED" means the LINEAR channel is severed, which is not the
+        same as carrying nothing: a saturated latch transmits its state at full
+        strength with a Jacobian near zero (see scripts/carry_profile.py). On
+        every cell measured so far the label agrees with the task-signal test,
+        but confirm with that test before reporting a severed write.
+        """
         if not self.is_read:
             return "CHANNEL CLOSED: memory neither read nor propagated"
         if not self.propagates:
-            return "WRITE SEVERED: memory is read but not carried across steps"
+            return "WRITE SEVERED: no linear channel across steps"
         return "chain live"
 
 
@@ -155,6 +163,31 @@ def recurrence_gain(
     ``rho >= 1`` means errors compound through the recurrence and one-step
     consistency cannot bound the deployed deviation. ``rho ~ 0`` means the
     opposite failure and the one actually observed: nothing is carried at all.
+
+    DO NOT COMPOUND THIS OVER DISTANCE. Two things break ``rho^D`` as a model of
+    what the deployed loop transmits, both measured in scripts/carry_profile.py.
+
+    The recurrence is not first order. The deployed loop keeps a sliding KV cache
+    -- the injection at step s writes K/V from ``m_{s-1}``, and step t attends
+    over the last W entries -- so ``m_t`` depends on ``m_{t-1} .. m_{t-W}`` and
+    the order is ``L*(W-1)``. Measured lag 6 exceeds ``(lag 1)^6`` by 1.4e9x.
+
+    And a Jacobian cannot see a saturated channel at all. ``d128_plain_s2``
+    records rho = 0.093 and a closed-loop sensitivity of 2e-7 over 24 steps while
+    carrying the task's actual signal at full strength: the two memory
+    trajectories separate at the needle and are still 1.43 apart at the query,
+    for a 13.7 logit margin. It has learned a latch, and perturbations decay back
+    into the basin they came from. Compounding rho understates the real channel
+    by 1.2e13x there, and by 6.7e41x on a failed cell.
+
+    So read rho as "is this channel LINEAR and maintained", not as "how much
+    survives D steps". In that narrower sense it is faithful: for the identity
+    path, whose channel really is linear, ``rho^D`` predicts the closed-loop
+    sensitivity to within 27%.
+
+    A CLOSED channel still reads closed by every measure -- the failed cell shows
+    exactly zero task-signal separation and answers wrongly -- so none of this
+    softens that reading.
     """
     t_len = tokens.shape[1]
     if not positions:

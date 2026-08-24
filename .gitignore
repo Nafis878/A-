@@ -24,3 +24,10 @@ venv/
 /ladder_runs/*/*
 !/ladder_runs/*/result.json
 ladder.log
+
+# Same pattern as ladder_runs: keep the measured profiles, drop the weights.
+/carry_runs/*
+!/carry_runs/*.json
+!/carry_runs/*/
+/carry_runs/*/*
+carry.log

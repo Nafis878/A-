@@ -20,11 +20,15 @@ every rung, down to the sampled batches: the generator is a pure function of
 then the only variable that moves.
 
     d_model    non-emb    s/step (this CPU)    10 cells
-       128        0.5M          0.90              3.8 h
+       128        0.5M          0.90              3.8 h*
        256        1.7M          1.36              5.7 h
        512        6.9M          2.99             12.5 h
        768       15.6M          5.49             22.9 h
       1024       27.4M          9.92             41.3 h
+
+* Measured over 3 steps after one warm-up step, which still carries allocator
+and lazy-init overhead: in the actual run d=128 cells take ~10 min rather than
+the 22.5 predicted, so the whole ladder lands near 43 h, not 95.
 
 The top rung is 27.4M non-embedding -- the same scale as `small_lm`, and 55x
 the model every published number here was measured on.
@@ -33,11 +37,15 @@ What this does NOT establish: depth scaling. L stays at 2, deliberately, because
 that is what keeps the task comparable. scripts/scale_study.py covers the depth
 axis and needs a GPU.
 
-Each rung runs the full protocol -- 5 seeds x {Maglev write rule, identity path}
--- so every rung yields a rate with a confidence interval and a Fisher test,
-not a single anecdote. Rungs are ordered cheapest-first and seeds are paired
-within a rung, so an interrupted run still leaves balanced arms at every rung it
-finished.
+Each rung runs both arms across seeds -- ten per arm at d=128 and d=256, five at
+the three expensive rungs -- so every rung yields a rate with a confidence
+interval and a Fisher test rather than a single anecdote. Ten is not cosmetic:
+at five seeds the smallest attainable p-value is 5/5 vs 0/5 = 1/252 = 4e-3, so
+such a rung cannot individually clear 1e-3 however clean the separation. The
+expensive rungs lean on the trend across rungs instead.
+
+Rungs are ordered cheapest-first and arms are paired within a seed, so an
+interrupted run still leaves balanced arms at every rung it finished.
 
 Alongside accuracy each cell records the deterministic diagnostics (rho, the
 Eq. 7 gate, the ablation delta, memory spread). Those are computed from the
@@ -102,7 +110,12 @@ RUNGS = [
 ]
 PARAMS_AT = {128: 527_000, 256: 1_710_000, 512: 6_880_000,
              768: 15_600_000, 1024: 27_400_000}
-SEEDS = range(5)
+# Seeds per arm, per rung. The cheap rungs can afford the archived study's ten,
+# and the difference is not cosmetic: with five seeds the SMALLEST attainable
+# p-value is 5/5 vs 0/5 = 1/252 = 4e-3, so a rung cannot individually clear 1e-3
+# no matter how clean the separation. Ten seeds reach 1.6e-3 at 10/10 vs 3/10.
+# The expensive rungs stay at five and lean on the trend across rungs instead.
+SEEDS_AT = {128: 10, 256: 10, 512: 5, 768: 5, 1024: 5}
 ARMS = {"plain": {}, "res": {"model.memory_residual": True}}
 
 # A cell needs room for its checkpoint (weights + two Adam moments) written
@@ -118,7 +131,7 @@ def cells(only: Optional[int]) -> List[Dict[str, Any]]:
     for d, h, kv, secs in RUNGS:
         if only is not None and d != only:
             continue
-        for seed in SEEDS:
+        for seed in range(SEEDS_AT.get(d, 5)):
             for arm, extra in ARMS.items():
                 over = {"model.d_model": d, "model.n_heads": h, "model.n_kv_heads": kv,
                         "run.seed": seed}
