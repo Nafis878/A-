@@ -100,10 +100,16 @@ RUNGS = [
     (768, 12, 6, 5.49),
     (1024, 16, 8, 9.92),
 ]
+PARAMS_AT = {128: 527_000, 256: 1_710_000, 512: 6_880_000,
+             768: 15_600_000, 1024: 27_400_000}
 SEEDS = range(5)
 ARMS = {"plain": {}, "res": {"model.memory_residual": True}}
 
-MIN_FREE_GB = 1.0
+# A cell needs room for its checkpoint (weights + two Adam moments) written
+# atomically, so twice that transiently, plus headroom. Estimated from the
+# parameter count rather than fixed: 0.5 GB is ample at d=128 and not enough at
+# d=1024, where a checkpoint is ~330 MB.
+MIN_FREE_GB = 0.5
 
 
 def cells(only: Optional[int]) -> List[Dict[str, Any]]:
@@ -126,14 +132,16 @@ def _free_gb(path: Path) -> float:
     return shutil.disk_usage(path).free / 1e9
 
 
+def _needs_gb(d_model: int) -> float:
+    """Disk a cell needs: fp32 weights + two Adam moments, written atomically."""
+    n = PARAMS_AT.get(d_model, 30_000_000)
+    return MIN_FREE_GB + 2 * (3 * n * 4) / 1e9
+
+
 def run_cell(cell: Dict[str, Any], out_dir: Path) -> Dict[str, Any]:
     result = out_dir / cell["name"] / "result.json"
     if result.exists():
         return json.loads(result.read_text(encoding="utf-8"))
-
-    free = _free_gb(out_dir)
-    if free < MIN_FREE_GB:
-        raise RuntimeError(f"only {free:.1f} GB free; refusing to start {cell['name']}")
 
     over = dict(BASE)
     over.update(cell["over"])
@@ -273,14 +281,22 @@ def main(argv: Optional[List[str]] = None) -> int:
     print(f"free disk: {_free_gb(out_dir):.1f} GB\n", flush=True)
 
     t0 = time.time()
+    skipped: List[str] = []
     for i, cell in enumerate(todo, 1):
         cached = (out_dir / cell["name"] / "result.json").exists()
         if not cached and args.max_hours and (time.time() - t0) / 3600 > args.max_hours:
             print(f"\nstopping: --max-hours {args.max_hours} reached", flush=True)
             break
         if not cached:
+            free, need = _free_gb(out_dir), _needs_gb(cell["d"])
+            if free < need:
+                print(f"[{i}/{len(todo)}] SKIP {cell['name']}: needs {need:.1f} GB, "
+                      f"{free:.1f} GB free", flush=True)
+                skipped.append(cell["name"])
+                continue
             print(f"[{i}/{len(todo)}] {cell['name']}  "
-                  f"(~{cell['secs'] * BASE['optim.total_steps'] / 3600:.1f} h)", flush=True)
+                  f"(~{cell['secs'] * BASE['optim.total_steps'] / 3600:.1f} h, "
+                  f"needs {need:.1f} GB, {free:.1f} free)", flush=True)
         payload = run_cell(cell, out_dir)
         s = scored(payload)
         print(f"[{i}/{len(todo)}] {payload['name']:<20} ce={payload['final_ce']:.4f} "
@@ -289,6 +305,9 @@ def main(argv: Optional[List[str]] = None) -> int:
               f"[{payload['secs'] / 60:.0f} min, {_free_gb(out_dir):.1f} GB free]",
               flush=True)
 
+    if skipped:
+        print(f"\nskipped {len(skipped)} cells for disk: {', '.join(skipped)}")
+        print("free space and re-run the same command to pick them up.")
     summarise(out_dir)
     return 0
 
