@@ -1,0 +1,22 @@
+chance=0.0625   shared refs: lam0 par=.840 | lam.03 par=.309 | lam.1 PLATEAU
+
+=== attempt 1  21:29:02 ===
+chance=0.0625   shared refs: lam0 par=.840 | lam.03 par=.309 | lam.1 PLATEAU
+
+an_separate_lam0.0         ce=2.591 LEARNED par=0.124 dep=0.055 [767s]
+an_separate_lam0.01        ce=2.114 LEARNED par=0.138 dep=0.069 [685s]
+an_separate_lam0.03        ce=2.194 LEARNED par=0.115 dep=0.070 [726s]
+an_separate_lam0.1         ce=1.793 LEARNED par=0.427 dep=0.077 [1146s]
+an_separate_lam0.3         ce=2.768 PLATEAU par=0.069 dep=0.069 [1174s]
+an_separate_lam1.0         ce=2.765 PLATEAU par=0.069 dep=0.069 [1292s]
+=== exited 1; restarting in 10s ===
+=== attempt 2  23:06:42 ===
+chance=0.0625   shared refs: lam0 par=.840 | lam.03 par=.309 | lam.1 PLATEAU
+
+an_separate_lam0.0         ce=2.591 LEARNED par=0.124 dep=0.055 [767s]
+an_separate_lam0.01        ce=2.114 LEARNED par=0.138 dep=0.069 [685s]
+an_separate_lam0.03        ce=2.194 LEARNED par=0.115 dep=0.070 [726s]
+an_separate_lam0.1         ce=1.793 LEARNED par=0.427 dep=0.077 [1146s]
+an_separate_lam0.3         ce=2.768 PLATEAU par=0.069 dep=0.069 [1174s]
+an_separate_lam1.0         ce=2.765 PLATEAU par=0.069 dep=0.069 [1292s]
+=== COMPLETE ===

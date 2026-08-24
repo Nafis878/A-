@@ -1,0 +1,206 @@
+{
+  "config": {
+    "model": {
+      "kind": "maglev",
+      "d_model": 256,
+      "n_layers": 4,
+      "n_heads": 4,
+      "n_kv_heads": 4,
+      "ffn_mult": 2.6667,
+      "vocab_size": 64,
+      "max_seq_len": 512,
+      "window": 64,
+      "prefiller_pattern": "SLSL",
+      "decoder_pattern": "SSSS",
+      "sharing": "shared",
+      "rope": true,
+      "rope_theta": 10000.0,
+      "norm_eps": 1e-06,
+      "logit_cap": 15.0,
+      "tie_embeddings": true,
+      "attn_impl": "sdpa",
+      "carrier_gain_seed": null,
+      "carrier_frac": 0.25
+    },
+    "data": {
+      "kind": "synthetic",
+      "seq_len": 512,
+      "task": "needle",
+      "distances": [
+        8,
+        16,
+        32,
+        48,
+        64,
+        96,
+        128,
+        192,
+        256,
+        384
+      ],
+      "n_keys": 16,
+      "n_values": 16,
+      "n_filler": 16,
+      "n_distractors": 4,
+      "loss_on_answer_only": true,
+      "shard_dir": null,
+      "tokenizer_path": null,
+      "val_tokens": 2000000
+    },
+    "loss": {
+      "lam": 0.3,
+      "consistency": "uniform",
+      "mask_k_pct": null,
+      "influence": {
+        "estimator": "saliency",
+        "horizon_H": 64,
+        "refresh_every": 50,
+        "ema_decay": 0.9,
+        "detach_local": true,
+        "eps": 1e-08
+      }
+    },
+    "optim": {
+      "lr": 0.003,
+      "betas": [
+        0.9,
+        0.95
+      ],
+      "weight_decay": 0.1,
+      "warmup": 200,
+      "schedule": "cosine",
+      "grad_clip": 1.0,
+      "total_steps": 4000,
+      "global_tokens_per_step": 65536,
+      "micro_batch": null,
+      "precision": "auto",
+      "compile": false
+    },
+    "run": {
+      "name": "p2_uniform_lam0.3_shared",
+      "seed": 0,
+      "out_dir": "results",
+      "drive_dir": null,
+      "ckpt_every": 250,
+      "log_every": 10,
+      "eval_every": 500,
+      "heartbeat_secs": 60,
+      "wandb": false
+    }
+  },
+  "config_hash": "4414b3721dad1f45ba524917300c7a5223a5f6cbb9d0a070f82d6c1d7f683d84",
+  "git_commit": "5dbe0fde44b0cb299803d676d5246c63217c88d0",
+  "gpu": "NVIDIA A100-SXM4-40GB",
+  "precision": "bf16",
+  "micro_batch": 128,
+  "grad_accum": 1,
+  "seed": 0,
+  "steps": 4000,
+  "wall_clock_s": 692.27113032341,
+  "final_ce": 0.07515503466129303,
+  "final_consistency": 0.014288526028394699,
+  "probe_accuracy_by_distance": {
+    "8": {
+      "acc": 1.0,
+      "nll": 0.02675986617578019,
+      "n": 64
+    },
+    "16": {
+      "acc": 0.96875,
+      "nll": 0.04606418430375925,
+      "n": 64
+    },
+    "32": {
+      "acc": 0.953125,
+      "nll": 0.07554021931355237,
+      "n": 64
+    },
+    "48": {
+      "acc": 0.96875,
+      "nll": 0.045394785580356256,
+      "n": 64
+    },
+    "64": {
+      "acc": 0.984375,
+      "nll": 0.051057207436315366,
+      "n": 64
+    },
+    "96": {
+      "acc": 0.953125,
+      "nll": 0.08508363154214749,
+      "n": 64
+    },
+    "128": {
+      "acc": 0.953125,
+      "nll": 0.18757551856469945,
+      "n": 64
+    },
+    "192": {
+      "acc": 0.28125,
+      "nll": 3.2597471268381923,
+      "n": 64
+    },
+    "256": {
+      "acc": 0.015625,
+      "nll": 4.650215743109584,
+      "n": 64
+    },
+    "384": {
+      "acc": 0.0625,
+      "nll": 4.230614343017805,
+      "n": 64
+    }
+  },
+  "probe_accuracy_parallel": {
+    "8": {
+      "acc": 0.96875,
+      "nll": 0.07155342428814038,
+      "n": 64
+    },
+    "16": {
+      "acc": 0.9375,
+      "nll": 0.11159296490041015,
+      "n": 64
+    },
+    "32": {
+      "acc": 0.953125,
+      "nll": 0.11564843061023566,
+      "n": 64
+    },
+    "48": {
+      "acc": 0.9375,
+      "nll": 0.08066996853267483,
+      "n": 64
+    },
+    "64": {
+      "acc": 0.953125,
+      "nll": 0.048647395803527615,
+      "n": 64
+    },
+    "96": {
+      "acc": 0.984375,
+      "nll": 0.03370853424348752,
+      "n": 64
+    },
+    "128": {
+      "acc": 0.9375,
+      "nll": 0.06974132510003983,
+      "n": 64
+    },
+    "192": {
+      "acc": 1.0,
+      "nll": 0.02128468437695119,
+      "n": 64
+    },
+    "256": {
+      "acc": 0.96875,
+      "nll": 0.0382310369550396,
+      "n": 64
+    },
+    "384": {
+      "acc": 0.984375,
+      "nll": 0.021104525083501358,
+      "n": 64
+    }
+  }
+}

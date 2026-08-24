@@ -1,0 +1,127 @@
+{
+  "name": "f_par_lam01_plain",
+  "final_ce": 0.6937844157218933,
+  "deployed": {
+    "8": {
+      "acc": 0.46875,
+      "nll": 0.6933264154940844,
+      "n": 128
+    },
+    "12": {
+      "acc": 0.5234375,
+      "nll": 0.6930593866854906,
+      "n": 128
+    },
+    "16": {
+      "acc": 0.515625,
+      "nll": 0.6930975788272917,
+      "n": 128
+    },
+    "24": {
+      "acc": 0.515625,
+      "nll": 0.6930973483249545,
+      "n": 128
+    }
+  },
+  "parallel": {
+    "8": {
+      "acc": 0.46875,
+      "nll": 0.6933264136314392,
+      "n": 128
+    },
+    "12": {
+      "acc": 0.5234375,
+      "nll": 0.693059385754168,
+      "n": 128
+    },
+    "16": {
+      "acc": 0.515625,
+      "nll": 0.6930975802242756,
+      "n": 128
+    },
+    "24": {
+      "acc": 0.515625,
+      "nll": 0.6930973487906158,
+      "n": 128
+    }
+  },
+  "secs": 126.08517813682556,
+  "config": {
+    "model": {
+      "kind": "maglev",
+      "d_model": 128,
+      "n_layers": 2,
+      "n_heads": 4,
+      "n_kv_heads": 2,
+      "ffn_mult": 2.6667,
+      "vocab_size": 64,
+      "max_seq_len": 48,
+      "window": 4,
+      "prefiller_pattern": "SL",
+      "decoder_pattern": "SS",
+      "sharing": "shared",
+      "rope": true,
+      "rope_theta": 10000.0,
+      "norm_eps": 1e-06,
+      "logit_cap": 15.0,
+      "tie_embeddings": true,
+      "attn_impl": "sdpa",
+      "memory_residual": false,
+      "memory_gate_bias": 2.0
+    },
+    "data": {
+      "kind": "synthetic",
+      "seq_len": 48,
+      "task": "delayed_recall",
+      "distances": [
+        8,
+        12,
+        16,
+        24
+      ],
+      "n_keys": 4,
+      "n_values": 2,
+      "n_filler": 8,
+      "n_distractors": 0,
+      "loss_on_answer_only": true,
+      "shard_dir": null,
+      "tokenizer_path": null,
+      "val_tokens": 2000000
+    },
+    "loss": {
+      "lam": 0.1,
+      "consistency": "uniform",
+      "detach_target": false,
+      "propagation_weight": 0.0,
+      "propagation_target": 1.0
+    },
+    "optim": {
+      "lr": 0.003,
+      "betas": [
+        0.9,
+        0.95
+      ],
+      "weight_decay": 0.1,
+      "warmup": 100,
+      "schedule": "cosine",
+      "grad_clip": 1.0,
+      "total_steps": 1500,
+      "global_tokens_per_step": 1536,
+      "micro_batch": 32,
+      "precision": "auto",
+      "compile": false,
+      "train_mode": "parallel"
+    },
+    "run": {
+      "name": "f_par_lam01_plain",
+      "seed": 0,
+      "out_dir": "C:\\Users\\UseR\\AppData\\Local\\Temp\\claude\\c--Users-UseR-Downloads-A\\33c40683-2cc9-4597-b751-2ee8ef01368d\\scratchpad\\exp\\runs",
+      "drive_dir": null,
+      "ckpt_every": 100,
+      "log_every": 1000000,
+      "eval_every": 500,
+      "heartbeat_secs": 60,
+      "wandb": false
+    }
+  }
+}

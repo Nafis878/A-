@@ -1,0 +1,159 @@
+{
+  "name": "lam0.003_uniform",
+  "seed": 0,
+  "final_ce": 2.210322141647339,
+  "final_consistency": 0.5465292930603027,
+  "deployed": {
+    "16": {
+      "acc": 0.0859375,
+      "nll": 3.946659976616502,
+      "n": 128
+    },
+    "24": {
+      "acc": 0.0859375,
+      "nll": 3.8682523742318153,
+      "n": 128
+    },
+    "32": {
+      "acc": 0.046875,
+      "nll": 4.172310011461377,
+      "n": 128
+    },
+    "48": {
+      "acc": 0.0390625,
+      "nll": 4.062560964375734,
+      "n": 128
+    },
+    "64": {
+      "acc": 0.15625,
+      "nll": 3.751940761692822,
+      "n": 128
+    },
+    "96": {
+      "acc": 0.046875,
+      "nll": 4.148450447246432,
+      "n": 128
+    }
+  },
+  "parallel": {
+    "16": {
+      "acc": 0.140625,
+      "nll": 2.20783369243145,
+      "n": 128
+    },
+    "24": {
+      "acc": 0.171875,
+      "nll": 2.1912036519497633,
+      "n": 128
+    },
+    "32": {
+      "acc": 0.1484375,
+      "nll": 2.1956487391144037,
+      "n": 128
+    },
+    "48": {
+      "acc": 0.09375,
+      "nll": 2.2651210501790047,
+      "n": 128
+    },
+    "64": {
+      "acc": 0.1953125,
+      "nll": 2.236658754758537,
+      "n": 128
+    },
+    "96": {
+      "acc": 0.109375,
+      "nll": 2.2856814600527287,
+      "n": 128
+    }
+  },
+  "secs": 383.42783188819885,
+  "config": {
+    "model": {
+      "kind": "maglev",
+      "d_model": 128,
+      "n_layers": 2,
+      "n_heads": 4,
+      "n_kv_heads": 2,
+      "ffn_mult": 2.6667,
+      "vocab_size": 64,
+      "max_seq_len": 128,
+      "window": 8,
+      "prefiller_pattern": "SL",
+      "decoder_pattern": "SS",
+      "sharing": "shared",
+      "rope": true,
+      "rope_theta": 10000.0,
+      "norm_eps": 1e-06,
+      "logit_cap": 15.0,
+      "tie_embeddings": true,
+      "attn_impl": "sdpa",
+      "carrier_gain_seed": null,
+      "carrier_frac": 0.25
+    },
+    "data": {
+      "kind": "synthetic",
+      "seq_len": 128,
+      "task": "delayed_recall",
+      "distances": [
+        16,
+        24,
+        32,
+        48,
+        64,
+        96
+      ],
+      "n_keys": 16,
+      "n_values": 16,
+      "n_filler": 16,
+      "n_distractors": 2,
+      "loss_on_answer_only": true,
+      "shard_dir": null,
+      "tokenizer_path": null,
+      "val_tokens": 2000000
+    },
+    "loss": {
+      "lam": 0.003,
+      "consistency": "uniform",
+      "mask_k_pct": null,
+      "detach_target": false,
+      "unroll_k": 1,
+      "unroll_weight": 1.0,
+      "influence": {
+        "estimator": "saliency",
+        "horizon_H": 64,
+        "refresh_every": 50,
+        "ema_decay": 0.9,
+        "detach_local": true,
+        "eps": 1e-08
+      }
+    },
+    "optim": {
+      "lr": 0.003,
+      "betas": [
+        0.9,
+        0.95
+      ],
+      "weight_decay": 0.1,
+      "warmup": 100,
+      "schedule": "cosine",
+      "grad_clip": 1.0,
+      "total_steps": 2000,
+      "global_tokens_per_step": 4096,
+      "micro_batch": 32,
+      "precision": "auto",
+      "compile": false
+    },
+    "run": {
+      "name": "lam0.003_uniform",
+      "seed": 0,
+      "out_dir": "C:\\Users\\UseR\\AppData\\Local\\Temp\\claude\\c--Users-UseR-Downloads-A\\33c40683-2cc9-4597-b751-2ee8ef01368d\\scratchpad\\exp\\runs",
+      "drive_dir": null,
+      "ckpt_every": 1000000,
+      "log_every": 1000000,
+      "eval_every": 500,
+      "heartbeat_secs": 60,
+      "wandb": false
+    }
+  }
+}

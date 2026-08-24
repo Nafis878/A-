@@ -1,0 +1,157 @@
+{
+  "name": "pilot_maglev_lam0",
+  "seed": 0,
+  "final_ce": 0.6031919717788696,
+  "final_consistency": 0.0,
+  "deployed": {
+    "16": {
+      "acc": 0.0625,
+      "nll": 5.749033689731732,
+      "n": 128
+    },
+    "24": {
+      "acc": 0.0546875,
+      "nll": 6.013598083285615,
+      "n": 128
+    },
+    "32": {
+      "acc": 0.0703125,
+      "nll": 5.903708504280075,
+      "n": 128
+    },
+    "48": {
+      "acc": 0.0625,
+      "nll": 5.9729517821688205,
+      "n": 128
+    },
+    "64": {
+      "acc": 0.0625,
+      "nll": 5.546645742841065,
+      "n": 128
+    },
+    "96": {
+      "acc": 0.0859375,
+      "nll": 6.044174174312502,
+      "n": 128
+    }
+  },
+  "parallel": {
+    "16": {
+      "acc": 0.8515625,
+      "nll": 0.7989876320352778,
+      "n": 128
+    },
+    "24": {
+      "acc": 0.828125,
+      "nll": 0.8249002096708864,
+      "n": 128
+    },
+    "32": {
+      "acc": 0.8671875,
+      "nll": 0.7189274445408955,
+      "n": 128
+    },
+    "48": {
+      "acc": 0.8359375,
+      "nll": 0.7409924404346384,
+      "n": 128
+    },
+    "64": {
+      "acc": 0.8828125,
+      "nll": 0.7267847894690931,
+      "n": 128
+    },
+    "96": {
+      "acc": 0.7734375,
+      "nll": 1.0529770464054309,
+      "n": 128
+    }
+  },
+  "secs": 327.7648105621338,
+  "config": {
+    "model": {
+      "kind": "maglev",
+      "d_model": 128,
+      "n_layers": 2,
+      "n_heads": 4,
+      "n_kv_heads": 2,
+      "ffn_mult": 2.6667,
+      "vocab_size": 64,
+      "max_seq_len": 128,
+      "window": 8,
+      "prefiller_pattern": "SL",
+      "decoder_pattern": "SS",
+      "sharing": "shared",
+      "rope": true,
+      "rope_theta": 10000.0,
+      "norm_eps": 1e-06,
+      "logit_cap": 15.0,
+      "tie_embeddings": true,
+      "attn_impl": "sdpa",
+      "carrier_gain_seed": null,
+      "carrier_frac": 0.25
+    },
+    "data": {
+      "kind": "synthetic",
+      "seq_len": 128,
+      "task": "delayed_recall",
+      "distances": [
+        16,
+        24,
+        32,
+        48,
+        64,
+        96
+      ],
+      "n_keys": 16,
+      "n_values": 16,
+      "n_filler": 16,
+      "n_distractors": 2,
+      "loss_on_answer_only": true,
+      "shard_dir": null,
+      "tokenizer_path": null,
+      "val_tokens": 2000000
+    },
+    "loss": {
+      "lam": 0.0,
+      "consistency": "none",
+      "mask_k_pct": null,
+      "detach_target": false,
+      "influence": {
+        "estimator": "saliency",
+        "horizon_H": 64,
+        "refresh_every": 50,
+        "ema_decay": 0.9,
+        "detach_local": true,
+        "eps": 1e-08
+      }
+    },
+    "optim": {
+      "lr": 0.003,
+      "betas": [
+        0.9,
+        0.95
+      ],
+      "weight_decay": 0.1,
+      "warmup": 100,
+      "schedule": "cosine",
+      "grad_clip": 1.0,
+      "total_steps": 2000,
+      "global_tokens_per_step": 4096,
+      "micro_batch": 32,
+      "precision": "auto",
+      "compile": false
+    },
+    "run": {
+      "name": "pilot_maglev_lam0",
+      "seed": 0,
+      "out_dir": "C:\\Users\\UseR\\AppData\\Local\\Temp\\claude\\c--Users-UseR-Downloads-A\\33c40683-2cc9-4597-b751-2ee8ef01368d\\scratchpad\\exp\\runs",
+      "drive_dir": null,
+      "ckpt_every": 1000000,
+      "log_every": 1000000,
+      "eval_every": 500,
+      "heartbeat_secs": 60,
+      "wandb": false
+    }
+  }
+}

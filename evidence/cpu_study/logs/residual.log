@@ -1,0 +1,40 @@
+=== attempt 1  00:45:16 ===
+chance 0.5, ln(2)=0.6931.  BPTT without residual: ce 0.6932 = chance
+
+=== exited 1; restarting in 10s ===
+=== attempt 2  00:48:06 ===
+Traceback (most recent call last):
+  File "C:\Users\UseR\AppData\Local\Temp\claude\c--Users-UseR-Downloads-A\33c40683-2cc9-4597-b751-2ee8ef01368d\scratchpad\exp\residual.py", line 21, in <module>
+    from rwc.train import Trainer
+  File "c:\Users/UseR/Downloads/A\rwc\train.py", line 39, in <module>
+    from .influence import InfluenceEMA, grad_influence, saliency_influence
+  File "c:\Users/UseR/Downloads/A\rwc\influence.py", line 34, in <module>
+    from .config import InfluenceConfig
+ImportError: cannot import name 'InfluenceConfig' from 'rwc.config' (c:\Users/UseR/Downloads/A\rwc\config.py)
+=== exited 1; restarting in 10s ===
+=== attempt 3  00:48:18 ===
+Traceback (most recent call last):
+  File "C:\Users\UseR\AppData\Local\Temp\claude\c--Users-UseR-Downloads-A\33c40683-2cc9-4597-b751-2ee8ef01368d\scratchpad\exp\residual.py", line 21, in <module>
+    from rwc.train import Trainer
+  File "c:\Users/UseR/Downloads/A\rwc\train.py", line 39, in <module>
+    from .influence import InfluenceEMA, grad_influence, saliency_influence
+  File "c:\Users/UseR/Downloads/A\rwc\influence.py", line 34, in <module>
+    from .config import InfluenceConfig
+ImportError: cannot import name 'InfluenceConfig' from 'rwc.config' (c:\Users/UseR/Downloads/A\rwc\config.py)
+=== exited 1; restarting in 10s ===
+=== attempt 4  00:48:30 ===
+Traceback (most recent call last):
+  File "C:\Users\UseR\AppData\Local\Temp\claude\c--Users-UseR-Downloads-A\33c40683-2cc9-4597-b751-2ee8ef01368d\scratchpad\exp\residual.py", line 21, in <module>
+    from rwc.train import Trainer
+  File "c:\Users/UseR/Downloads/A\rwc\train.py", line 39, in <module>
+    from .influence import InfluenceEMA, grad_influence, saliency_influence
+ImportError: cannot import name 'InfluenceEMA' from 'rwc.influence' (c:\Users/UseR/Downloads/A\rwc\influence.py)
+=== exited 1; restarting in 10s ===
+=== attempt 1  00:56:44 ===
+chance 0.5, ln(2)=0.6931.  BPTT without residual: ce 0.6932 = chance
+
+r_bptt_plain               ce=0.6947 par=0.506 DEP=0.506 (hi 0.543) at chance | D8:0.47  D12:0.52  D16:0.52  D24:0.52 [457s]
+r_bptt_res                 ce=0.0000 par=0.494 DEP=1.000 (hi 0.543) ABOVE CHANCE | D8:1.00  D12:1.00  D16:1.00  D24:1.00 [556s]
+r_bptt_res_b4              ce=0.6930 par=0.506 DEP=0.494 (hi 0.543) at chance | D8:0.53  D12:0.48  D16:0.48  D24:0.48 [675s]
+r_par_res                  ce=0.0000 par=1.000 DEP=0.506 (hi 0.543) at chance | D8:0.47  D12:0.52  D16:0.52  D24:0.52 [173s]
+=== COMPLETE ===

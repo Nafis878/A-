@@ -1,0 +1,17 @@
+=== attempt 1  02:21:07 ===
+rel_plain_s3  deployed 0.490  fails [701s]
+rel_plain_s4  deployed 0.506  fails [648s]
+rel_plain_s5  deployed 0.516  fails [653s]
+rel_plain_s6  deployed 0.494  fails [642s]
+rel_plain_s7  deployed 1.000  WORKS [671s]
+rel_plain_s8  deployed 1.000  WORKS [542s]
+rel_plain_s9  deployed 0.459  fails [458s]
+rel_res_s2    deployed 1.000  WORKS [476s]
+rel_res_s3    deployed 1.000  WORKS [471s]
+rel_res_s4    deployed 1.000  WORKS [469s]
+rel_res_s5    deployed 1.000  WORKS [474s]
+rel_res_s6    deployed 1.000  WORKS [474s]
+rel_res_s7    deployed 1.000  WORKS [484s]
+rel_res_s8    deployed 1.000  WORKS [472s]
+rel_res_s9    deployed 1.000  WORKS [472s]
+=== COMPLETE ===

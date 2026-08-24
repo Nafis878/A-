@@ -1,0 +1,153 @@
+{
+  "config": {
+    "model": {
+      "kind": "maglev",
+      "d_model": 256,
+      "n_layers": 4,
+      "n_heads": 4,
+      "n_kv_heads": 4,
+      "ffn_mult": 2.6667,
+      "vocab_size": 64,
+      "max_seq_len": 512,
+      "window": 64,
+      "prefiller_pattern": "SLSL",
+      "decoder_pattern": "SSSS",
+      "sharing": "shared",
+      "rope": true,
+      "rope_theta": 10000.0,
+      "norm_eps": 1e-06,
+      "logit_cap": 15.0,
+      "tie_embeddings": true,
+      "attn_impl": "sdpa",
+      "carrier_gain_seed": null,
+      "carrier_frac": 0.25
+    },
+    "data": {
+      "kind": "synthetic",
+      "seq_len": 512,
+      "task": "needle",
+      "distances": [
+        8,
+        16,
+        32,
+        48,
+        64,
+        96,
+        128,
+        192,
+        256,
+        384
+      ],
+      "n_keys": 16,
+      "n_values": 16,
+      "n_filler": 16,
+      "n_distractors": 4,
+      "loss_on_answer_only": true,
+      "shard_dir": null,
+      "tokenizer_path": null,
+      "val_tokens": 2000000
+    },
+    "loss": {
+      "lam": 0.0,
+      "consistency": "none",
+      "mask_k_pct": null,
+      "influence": {
+        "estimator": "saliency",
+        "horizon_H": 64,
+        "refresh_every": 50,
+        "ema_decay": 0.9,
+        "detach_local": true,
+        "eps": 1e-08
+      }
+    },
+    "optim": {
+      "lr": 0.003,
+      "betas": [
+        0.9,
+        0.95
+      ],
+      "weight_decay": 0.1,
+      "warmup": 200,
+      "schedule": "cosine",
+      "grad_clip": 1.0,
+      "total_steps": 8000,
+      "global_tokens_per_step": 65536,
+      "micro_batch": null,
+      "precision": "auto",
+      "compile": false
+    },
+    "run": {
+      "name": "cal_f_needle",
+      "seed": 0,
+      "out_dir": "results",
+      "drive_dir": null,
+      "ckpt_every": 250,
+      "log_every": 10,
+      "eval_every": 500,
+      "heartbeat_secs": 60,
+      "wandb": false
+    }
+  },
+  "config_hash": "c2990075f7e96b6f87d692ca598304690c86eace899026f1747960f366ccd637",
+  "git_commit": "5b44f280f912c58bd36b25f04eda687b6a275da6",
+  "gpu": "NVIDIA A100-SXM4-40GB",
+  "precision": "bf16",
+  "micro_batch": 128,
+  "grad_accum": 1,
+  "seed": 0,
+  "steps": 8000,
+  "wall_clock_s": 1368.5123527050018,
+  "final_ce": 0.05830393731594086,
+  "probe_accuracy_by_distance": {
+    "8": {
+      "acc": 0.953125,
+      "nll": 0.10278097337049985,
+      "n": 64
+    },
+    "16": {
+      "acc": 0.96875,
+      "nll": 0.060849773992686096,
+      "n": 64
+    },
+    "32": {
+      "acc": 0.953125,
+      "nll": 0.06657647024940161,
+      "n": 64
+    },
+    "48": {
+      "acc": 0.96875,
+      "nll": 0.057179412230652815,
+      "n": 64
+    },
+    "64": {
+      "acc": 0.984375,
+      "nll": 0.021718602405599086,
+      "n": 64
+    },
+    "96": {
+      "acc": 0.984375,
+      "nll": 0.06263289302933117,
+      "n": 64
+    },
+    "128": {
+      "acc": 0.953125,
+      "nll": 0.06260451948492118,
+      "n": 64
+    },
+    "192": {
+      "acc": 0.984375,
+      "nll": 0.04143458579392245,
+      "n": 64
+    },
+    "256": {
+      "acc": 0.953125,
+      "nll": 0.05761629881908448,
+      "n": 64
+    },
+    "384": {
+      "acc": 0.96875,
+      "nll": 0.03167237298885084,
+      "n": 64
+    }
+  }
+}

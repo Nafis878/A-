@@ -1,0 +1,33 @@
+=== attempt 1  23:43:00 ===
+PHASE 0: does the memory chain work when it is actually trained?
+
+p0_bptt_v2_d0          ce=0.694 par=0.494 dep=0.494 (chance 0.500, 95% hi 0.543) at chance | D8:0.53  D12:0.48  D16:0.48  D24:0.48 [3863s]
+=== exited 1; restarting in 10s ===
+=== attempt 2  00:48:06 ===
+Traceback (most recent call last):
+  File "C:\Users\UseR\AppData\Local\Temp\claude\c--Users-UseR-Downloads-A\33c40683-2cc9-4597-b751-2ee8ef01368d\scratchpad\exp\phase0.py", line 25, in <module>
+    from rwc.train import Trainer
+  File "c:\Users/UseR/Downloads/A\rwc\train.py", line 39, in <module>
+    from .influence import InfluenceEMA, grad_influence, saliency_influence
+  File "c:\Users/UseR/Downloads/A\rwc\influence.py", line 34, in <module>
+    from .config import InfluenceConfig
+ImportError: cannot import name 'InfluenceConfig' from 'rwc.config' (c:\Users/UseR/Downloads/A\rwc\config.py)
+=== exited 1; restarting in 10s ===
+=== attempt 3  00:48:18 ===
+Traceback (most recent call last):
+  File "C:\Users\UseR\AppData\Local\Temp\claude\c--Users-UseR-Downloads-A\33c40683-2cc9-4597-b751-2ee8ef01368d\scratchpad\exp\phase0.py", line 25, in <module>
+    from rwc.train import Trainer
+  File "c:\Users/UseR/Downloads/A\rwc\train.py", line 39, in <module>
+    from .influence import InfluenceEMA, grad_influence, saliency_influence
+  File "c:\Users/UseR/Downloads/A\rwc\influence.py", line 34, in <module>
+    from .config import InfluenceConfig
+ImportError: cannot import name 'InfluenceConfig' from 'rwc.config' (c:\Users/UseR/Downloads/A\rwc\config.py)
+=== exited 1; restarting in 10s ===
+=== attempt 4  00:48:30 ===
+Traceback (most recent call last):
+  File "C:\Users\UseR\AppData\Local\Temp\claude\c--Users-UseR-Downloads-A\33c40683-2cc9-4597-b751-2ee8ef01368d\scratchpad\exp\phase0.py", line 25, in <module>
+    from rwc.train import Trainer
+  File "c:\Users/UseR/Downloads/A\rwc\train.py", line 39, in <module>
+    from .influence import InfluenceEMA, grad_influence, saliency_influence
+ImportError: cannot import name 'InfluenceEMA' from 'rwc.influence' (c:\Users/UseR/Downloads/A\rwc\influence.py)
+=== exited 1; restarting in 10s ===

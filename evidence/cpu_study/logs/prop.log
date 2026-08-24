@@ -1,0 +1,17 @@
+chance=0.0625
+
+=== attempt 1  21:29:04 ===
+chance=0.0625
+
+pp_lam0.1_w0.1         ce=2.510 LEARNED par=0.203 dep=0.068 [2114s]
+pp_lam0.03_w0.1        ce=0.303 LEARNED par=0.833 dep=0.048 [3238s]
+=== exited 1; restarting in 10s ===
+=== attempt 2  23:06:42 ===
+chance=0.0625
+
+pp_lam0.1_w0.1         ce=2.510 LEARNED par=0.203 dep=0.068 [2114s]
+pp_lam0.03_w0.1        ce=0.303 LEARNED par=0.833 dep=0.048 [3238s]
+[rwc] resumed from C:\Users\UseR\AppData\Local\Temp\claude\c--Users-UseR-Downloads-A\33c40683-2cc9-4597-b751-2ee8ef01368d\scratchpad\exp\runs\pp_lam0.1_w0.5\checkpoint.pt at step 200
+  [pp_lam0.1_w0.5] resumed at step 200/2000
+pp_lam0.1_w0.5         ce=2.767 PLATEAU par=0.073 dep=0.074 [3116s]
+=== COMPLETE ===

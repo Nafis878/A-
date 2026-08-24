@@ -1,0 +1,157 @@
+{
+  "name": "pilot_uniform_lam1",
+  "seed": 0,
+  "final_ce": 2.7678704261779785,
+  "final_consistency": 1.309099275204062e-06,
+  "deployed": {
+    "16": {
+      "acc": 0.0625,
+      "nll": 2.776686605066061,
+      "n": 128
+    },
+    "24": {
+      "acc": 0.0546875,
+      "nll": 2.772539436817169,
+      "n": 128
+    },
+    "32": {
+      "acc": 0.0703125,
+      "nll": 2.770807422697544,
+      "n": 128
+    },
+    "48": {
+      "acc": 0.0625,
+      "nll": 2.7723127733916044,
+      "n": 128
+    },
+    "64": {
+      "acc": 0.0546875,
+      "nll": 2.770307993516326,
+      "n": 128
+    },
+    "96": {
+      "acc": 0.078125,
+      "nll": 2.772716486826539,
+      "n": 128
+    }
+  },
+  "parallel": {
+    "16": {
+      "acc": 0.0625,
+      "nll": 2.776686605066061,
+      "n": 128
+    },
+    "24": {
+      "acc": 0.0546875,
+      "nll": 2.7725394405424595,
+      "n": 128
+    },
+    "32": {
+      "acc": 0.0703125,
+      "nll": 2.7708074245601892,
+      "n": 128
+    },
+    "48": {
+      "acc": 0.0625,
+      "nll": 2.7723127715289593,
+      "n": 128
+    },
+    "64": {
+      "acc": 0.0546875,
+      "nll": 2.770307993516326,
+      "n": 128
+    },
+    "96": {
+      "acc": 0.078125,
+      "nll": 2.772716488689184,
+      "n": 128
+    }
+  },
+  "secs": 350.1039185523987,
+  "config": {
+    "model": {
+      "kind": "maglev",
+      "d_model": 128,
+      "n_layers": 2,
+      "n_heads": 4,
+      "n_kv_heads": 2,
+      "ffn_mult": 2.6667,
+      "vocab_size": 64,
+      "max_seq_len": 128,
+      "window": 8,
+      "prefiller_pattern": "SL",
+      "decoder_pattern": "SS",
+      "sharing": "shared",
+      "rope": true,
+      "rope_theta": 10000.0,
+      "norm_eps": 1e-06,
+      "logit_cap": 15.0,
+      "tie_embeddings": true,
+      "attn_impl": "sdpa",
+      "carrier_gain_seed": null,
+      "carrier_frac": 0.25
+    },
+    "data": {
+      "kind": "synthetic",
+      "seq_len": 128,
+      "task": "delayed_recall",
+      "distances": [
+        16,
+        24,
+        32,
+        48,
+        64,
+        96
+      ],
+      "n_keys": 16,
+      "n_values": 16,
+      "n_filler": 16,
+      "n_distractors": 2,
+      "loss_on_answer_only": true,
+      "shard_dir": null,
+      "tokenizer_path": null,
+      "val_tokens": 2000000
+    },
+    "loss": {
+      "lam": 1.0,
+      "consistency": "uniform",
+      "mask_k_pct": null,
+      "detach_target": false,
+      "influence": {
+        "estimator": "saliency",
+        "horizon_H": 64,
+        "refresh_every": 50,
+        "ema_decay": 0.9,
+        "detach_local": true,
+        "eps": 1e-08
+      }
+    },
+    "optim": {
+      "lr": 0.003,
+      "betas": [
+        0.9,
+        0.95
+      ],
+      "weight_decay": 0.1,
+      "warmup": 100,
+      "schedule": "cosine",
+      "grad_clip": 1.0,
+      "total_steps": 2000,
+      "global_tokens_per_step": 4096,
+      "micro_batch": 32,
+      "precision": "auto",
+      "compile": false
+    },
+    "run": {
+      "name": "pilot_uniform_lam1",
+      "seed": 0,
+      "out_dir": "C:\\Users\\UseR\\AppData\\Local\\Temp\\claude\\c--Users-UseR-Downloads-A\\33c40683-2cc9-4597-b751-2ee8ef01368d\\scratchpad\\exp\\runs",
+      "drive_dir": null,
+      "ckpt_every": 1000000,
+      "log_every": 1000000,
+      "eval_every": 500,
+      "heartbeat_secs": 60,
+      "wandb": false
+    }
+  }
+}

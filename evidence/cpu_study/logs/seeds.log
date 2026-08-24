@@ -1,0 +1,52 @@
+=== attempt 1  22:05:49 ===
+sd_ctl_lam0.1_s1           ce=2.776 PLATEAU par=0.059 dep=0.059 [1122s]
+=== exited 1; restarting in 10s ===
+=== attempt 2  23:06:42 ===
+sd_ctl_lam0.1_s1           ce=2.776 PLATEAU par=0.059 dep=0.059 [1122s]
+[rwc] resumed from C:\Users\UseR\AppData\Local\Temp\claude\c--Users-UseR-Downloads-A\33c40683-2cc9-4597-b751-2ee8ef01368d\scratchpad\exp\runs\sd_pp_lam0.1_s1\checkpoint.pt at step 1400
+  [sd_pp_lam0.1_s1] resumed at step 1400/2000
+sd_pp_lam0.1_s1            ce=1.237 LEARNED par=0.639 dep=0.062 [1010s]
+sd_ctl_lam0.1_s2           ce=2.771 PLATEAU par=0.053 dep=0.053 [1153s]
+sd_pp_lam0.1_s2            ce=2.179 LEARNED par=0.288 dep=0.068 [2724s]
+=== COMPLETE ===
+=== attempt 1  00:29:10 ===
+sd_ctl_lam0.1_s1           ce=2.776 PLATEAU par=0.059 dep=0.059 [1122s]
+sd_pp_lam0.1_s1            ce=1.237 LEARNED par=0.639 dep=0.062 [1010s]
+sd_ctl_lam0.1_s2           ce=2.771 PLATEAU par=0.053 dep=0.053 [1153s]
+sd_pp_lam0.1_s2            ce=2.179 LEARNED par=0.288 dep=0.068 [2724s]
+sd_ctl_lam0.1_s3           ce=2.774 PLATEAU par=0.057 dep=0.057 [853s]
+=== exited 1; restarting in 10s ===
+=== attempt 2  00:48:06 ===
+Traceback (most recent call last):
+  File "C:\Users\UseR\AppData\Local\Temp\claude\c--Users-UseR-Downloads-A\33c40683-2cc9-4597-b751-2ee8ef01368d\scratchpad\exp\seeds.py", line 11, in <module>
+    from common import run
+  File "C:\Users/UseR/AppData/Local/Temp/claude/c--Users-UseR-Downloads-A/33c40683-2cc9-4597-b751-2ee8ef01368d/scratchpad/exp\common.py", line 14, in <module>
+    from rwc.train import Trainer
+  File "c:\Users/UseR/Downloads/A\rwc\train.py", line 39, in <module>
+    from .influence import InfluenceEMA, grad_influence, saliency_influence
+  File "c:\Users/UseR/Downloads/A\rwc\influence.py", line 34, in <module>
+    from .config import InfluenceConfig
+ImportError: cannot import name 'InfluenceConfig' from 'rwc.config' (c:\Users/UseR/Downloads/A\rwc\config.py)
+=== exited 1; restarting in 10s ===
+=== attempt 3  00:48:18 ===
+Traceback (most recent call last):
+  File "C:\Users\UseR\AppData\Local\Temp\claude\c--Users-UseR-Downloads-A\33c40683-2cc9-4597-b751-2ee8ef01368d\scratchpad\exp\seeds.py", line 11, in <module>
+    from common import run
+  File "C:\Users/UseR/AppData/Local/Temp/claude/c--Users-UseR-Downloads-A/33c40683-2cc9-4597-b751-2ee8ef01368d/scratchpad/exp\common.py", line 14, in <module>
+    from rwc.train import Trainer
+  File "c:\Users/UseR/Downloads/A\rwc\train.py", line 39, in <module>
+    from .influence import InfluenceEMA, grad_influence, saliency_influence
+  File "c:\Users/UseR/Downloads/A\rwc\influence.py", line 34, in <module>
+    from .config import InfluenceConfig
+ImportError: cannot import name 'InfluenceConfig' from 'rwc.config' (c:\Users/UseR/Downloads/A\rwc\config.py)
+=== exited 1; restarting in 10s ===
+=== attempt 4  00:48:30 ===
+Traceback (most recent call last):
+  File "C:\Users\UseR\AppData\Local\Temp\claude\c--Users-UseR-Downloads-A\33c40683-2cc9-4597-b751-2ee8ef01368d\scratchpad\exp\seeds.py", line 11, in <module>
+    from common import run
+  File "C:\Users/UseR/AppData/Local/Temp/claude/c--Users-UseR-Downloads-A/33c40683-2cc9-4597-b751-2ee8ef01368d/scratchpad/exp\common.py", line 14, in <module>
+    from rwc.train import Trainer
+  File "c:\Users/UseR/Downloads/A\rwc\train.py", line 39, in <module>
+    from .influence import InfluenceEMA, grad_influence, saliency_influence
+ImportError: cannot import name 'InfluenceEMA' from 'rwc.influence' (c:\Users/UseR/Downloads/A\rwc\influence.py)
+=== exited 1; restarting in 10s ===

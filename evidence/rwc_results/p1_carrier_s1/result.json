@@ -1,0 +1,129 @@
+{
+  "config": {
+    "model": {
+      "kind": "maglev",
+      "d_model": 256,
+      "n_layers": 4,
+      "n_heads": 4,
+      "n_kv_heads": 4,
+      "ffn_mult": 2.6667,
+      "vocab_size": 64,
+      "max_seq_len": 512,
+      "window": 16,
+      "prefiller_pattern": "SLSL",
+      "decoder_pattern": "SSSS",
+      "sharing": "shared",
+      "rope": true,
+      "rope_theta": 10000.0,
+      "norm_eps": 1e-06,
+      "logit_cap": 15.0,
+      "tie_embeddings": true,
+      "attn_impl": "sdpa",
+      "carrier_gain_seed": 7,
+      "carrier_frac": 0.25
+    },
+    "data": {
+      "kind": "synthetic",
+      "seq_len": 512,
+      "task": "carrier_copy",
+      "distances": [
+        64,
+        96,
+        128,
+        192,
+        256,
+        384
+      ],
+      "n_keys": 16,
+      "n_values": 16,
+      "n_filler": 16,
+      "n_distractors": 4,
+      "loss_on_answer_only": false,
+      "shard_dir": null,
+      "tokenizer_path": null,
+      "val_tokens": 2000000
+    },
+    "loss": {
+      "lam": 0.0,
+      "consistency": "none",
+      "mask_k_pct": null,
+      "influence": {
+        "estimator": "saliency",
+        "horizon_H": 64,
+        "refresh_every": 50,
+        "ema_decay": 0.9,
+        "detach_local": true,
+        "eps": 1e-08
+      }
+    },
+    "optim": {
+      "lr": 0.003,
+      "betas": [
+        0.9,
+        0.95
+      ],
+      "weight_decay": 0.1,
+      "warmup": 200,
+      "schedule": "cosine",
+      "grad_clip": 1.0,
+      "total_steps": 4000,
+      "global_tokens_per_step": 65536,
+      "micro_batch": null,
+      "precision": "auto",
+      "compile": false
+    },
+    "run": {
+      "name": "p1_carrier_s1",
+      "seed": 1,
+      "out_dir": "results",
+      "drive_dir": null,
+      "ckpt_every": 250,
+      "log_every": 10,
+      "eval_every": 500,
+      "heartbeat_secs": 60,
+      "wandb": false
+    }
+  },
+  "config_hash": "e6f925a9bfa7aaddd773bb896a9bc1144ec6f2448820acda0de8acb5366c9603",
+  "git_commit": "28f93e8a9d710635203a4273d7500ee1c43513c1",
+  "gpu": "NVIDIA A100-SXM4-40GB",
+  "precision": "bf16",
+  "micro_batch": 128,
+  "grad_accum": 1,
+  "seed": 1,
+  "steps": 4000,
+  "wall_clock_s": 688.5711245536804,
+  "final_ce": 2.813497304916382,
+  "probe_accuracy_by_distance": {
+    "64": {
+      "acc": 0.0625,
+      "nll": 2.7737645357847214,
+      "n": 64
+    },
+    "96": {
+      "acc": 0.03125,
+      "nll": 2.7735037207603455,
+      "n": 64
+    },
+    "128": {
+      "acc": 0.078125,
+      "nll": 2.772879984229803,
+      "n": 64
+    },
+    "192": {
+      "acc": 0.109375,
+      "nll": 2.7722075656056404,
+      "n": 64
+    },
+    "256": {
+      "acc": 0.046875,
+      "nll": 2.7750973775982857,
+      "n": 64
+    },
+    "384": {
+      "acc": 0.0625,
+      "nll": 2.77426840364933,
+      "n": 64
+    }
+  }
+}

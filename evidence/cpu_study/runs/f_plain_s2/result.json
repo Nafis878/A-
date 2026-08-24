@@ -1,0 +1,127 @@
+{
+  "name": "f_plain_s2",
+  "final_ce": 2.238896286144154e-06,
+  "deployed": {
+    "8": {
+      "acc": 1.0,
+      "nll": 1.8747503229832319e-06,
+      "n": 128
+    },
+    "12": {
+      "acc": 1.0,
+      "nll": 2.606767566248891e-06,
+      "n": 128
+    },
+    "16": {
+      "acc": 1.0,
+      "nll": 2.5844159097232478e-06,
+      "n": 128
+    },
+    "24": {
+      "acc": 1.0,
+      "nll": 2.523880146654278e-06,
+      "n": 128
+    }
+  },
+  "parallel": {
+    "8": {
+      "acc": 0.484375,
+      "nll": 6.973027195781139,
+      "n": 128
+    },
+    "12": {
+      "acc": 0.484375,
+      "nll": 7.594486538320449,
+      "n": 128
+    },
+    "16": {
+      "acc": 0.484375,
+      "nll": 7.594249036162761,
+      "n": 128
+    },
+    "24": {
+      "acc": 0.4921875,
+      "nll": 7.481975188478492,
+      "n": 128
+    }
+  },
+  "secs": 604.4344248771667,
+  "config": {
+    "model": {
+      "kind": "maglev",
+      "d_model": 128,
+      "n_layers": 2,
+      "n_heads": 4,
+      "n_kv_heads": 2,
+      "ffn_mult": 2.6667,
+      "vocab_size": 64,
+      "max_seq_len": 48,
+      "window": 4,
+      "prefiller_pattern": "SL",
+      "decoder_pattern": "SS",
+      "sharing": "shared",
+      "rope": true,
+      "rope_theta": 10000.0,
+      "norm_eps": 1e-06,
+      "logit_cap": 15.0,
+      "tie_embeddings": true,
+      "attn_impl": "sdpa",
+      "memory_residual": false,
+      "memory_gate_bias": 2.0
+    },
+    "data": {
+      "kind": "synthetic",
+      "seq_len": 48,
+      "task": "delayed_recall",
+      "distances": [
+        8,
+        12,
+        16,
+        24
+      ],
+      "n_keys": 4,
+      "n_values": 2,
+      "n_filler": 8,
+      "n_distractors": 0,
+      "loss_on_answer_only": true,
+      "shard_dir": null,
+      "tokenizer_path": null,
+      "val_tokens": 2000000
+    },
+    "loss": {
+      "lam": 0.0,
+      "consistency": "none",
+      "detach_target": false,
+      "propagation_weight": 0.0,
+      "propagation_target": 1.0
+    },
+    "optim": {
+      "lr": 0.003,
+      "betas": [
+        0.9,
+        0.95
+      ],
+      "weight_decay": 0.1,
+      "warmup": 100,
+      "schedule": "cosine",
+      "grad_clip": 1.0,
+      "total_steps": 1500,
+      "global_tokens_per_step": 1536,
+      "micro_batch": 32,
+      "precision": "auto",
+      "compile": false,
+      "train_mode": "bptt"
+    },
+    "run": {
+      "name": "f_plain_s2",
+      "seed": 2,
+      "out_dir": "C:\\Users\\UseR\\AppData\\Local\\Temp\\claude\\c--Users-UseR-Downloads-A\\33c40683-2cc9-4597-b751-2ee8ef01368d\\scratchpad\\exp\\runs",
+      "drive_dir": null,
+      "ckpt_every": 100,
+      "log_every": 1000000,
+      "eval_every": 500,
+      "heartbeat_secs": 60,
+      "wandb": false
+    }
+  }
+}

@@ -15,4 +15,12 @@ venv/
 *.bin
 *.npy
 *.uint16
-/ladder_runs/
+
+# 86 h of CPU compute lives here. Keep the evidence (result.json), drop the
+# bulk (checkpoints, loss traces): git cannot re-include a file whose parent
+# directory is excluded, so the directories must stay un-ignored.
+/ladder_runs/*
+!/ladder_runs/*/
+/ladder_runs/*/*
+!/ladder_runs/*/result.json
+ladder.log

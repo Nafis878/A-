@@ -1,0 +1,23 @@
+=== attempt 1  01:46:02 ===
+Q1 replication
+
+f_plain_s1               ce=0.6917 DEP=0.482 (ch 0.500, hi 0.543) at chance | D8:0.48  D12:0.48  D16:0.48  D24:0.48 [663s]
+f_res_s1                 ce=0.0000 DEP=1.000 (ch 0.500, hi 0.543) ABOVE CHANCE | D8:1.00  D12:1.00  D16:1.00  D24:1.00 [686s]
+f_plain_s2               ce=0.0000 DEP=1.000 (ch 0.500, hi 0.543) ABOVE CHANCE | D8:1.00  D12:1.00  D16:1.00  D24:1.00 [604s]
+f_res_s2                 ce=0.0000 DEP=1.000 (ch 0.500, hi 0.543) ABOVE CHANCE | D8:1.00  D12:1.00  D16:1.00  D24:1.00 [658s]
+
+Q2 harder tasks (with distractors)
+
+f_plain_v8               ce=1.8118 DEP=0.207 (ch 0.125, hi 0.156) ABOVE CHANCE | D8:0.23  D12:0.21  D16:0.23  D24:0.15 [674s]
+f_res_v8                 ce=0.1339 DEP=0.896 (ch 0.125, hi 0.156) ABOVE CHANCE | D8:0.93  D12:0.95  D16:0.87  D24:0.84 [681s]
+f_res_v16                ce=0.1079 DEP=0.900 (ch 0.062, hi 0.087) ABOVE CHANCE | D8:0.88  D12:0.92  D16:0.90  D24:0.90 [678s]
+
+Q3 longer distances
+
+f_res_far                ce=0.0000 DEP=1.000 (ch 0.500, hi 0.543) ABOVE CHANCE | D8:1.00  D16:1.00  D24:1.00  D32:1.00 [679s]
+
+Q4 does the identity path also fix the consistency loss?
+
+f_par_lam01_plain        ce=0.6938 DEP=0.506 (ch 0.500, hi 0.543) at chance | D8:0.47  D12:0.52  D16:0.52  D24:0.52 [126s]
+f_par_lam01_res          ce=0.0000 DEP=0.494 (ch 0.500, hi 0.543) at chance | D8:0.53  D12:0.48  D16:0.48  D24:0.48 [135s]
+=== COMPLETE ===
