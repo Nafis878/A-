@@ -1,0 +1,140 @@
+{
+  "name": "d768_plain_s0",
+  "d_model": 768,
+  "arm": "plain",
+  "seed": 0,
+  "n_params": 15634948,
+  "final_ce": 0.691706657409668,
+  "deployed": {
+    "8": {
+      "acc": 0.53125,
+      "nll": 0.6928010005503893,
+      "n": 128
+    },
+    "12": {
+      "acc": 0.4765625,
+      "nll": 0.6934375604614615,
+      "n": 128
+    },
+    "16": {
+      "acc": 0.484375,
+      "nll": 0.693345501087606,
+      "n": 128
+    },
+    "24": {
+      "acc": 0.484375,
+      "nll": 0.6933465613983572,
+      "n": 128
+    }
+  },
+  "parallel": {
+    "8": {
+      "acc": 0.53125,
+      "nll": 0.6928009930998087,
+      "n": 128
+    },
+    "12": {
+      "acc": 0.4765625,
+      "nll": 0.6934375753626227,
+      "n": 128
+    },
+    "16": {
+      "acc": 0.484375,
+      "nll": 0.6933455159887671,
+      "n": 128
+    },
+    "24": {
+      "acc": 0.484375,
+      "nll": 0.6933465721085668,
+      "n": 128
+    }
+  },
+  "rho": 0.0006192534492583945,
+  "sigma_max": 0.004718795884400606,
+  "ablation": 0.11293601989746094,
+  "g_rec": 1.0531599521636963,
+  "g_loc": 0.8885010480880737,
+  "verdict": "WRITE SEVERED: memory is read but not carried across steps",
+  "spread": 0.0003537878510542214,
+  "mem_norm": 30.346532821655273,
+  "mem_rank": 42.0,
+  "secs": 2226.6826746463776,
+  "config": {
+    "model": {
+      "kind": "maglev",
+      "d_model": 768,
+      "n_layers": 2,
+      "n_heads": 12,
+      "n_kv_heads": 6,
+      "ffn_mult": 2.6667,
+      "vocab_size": 64,
+      "max_seq_len": 48,
+      "window": 4,
+      "prefiller_pattern": "SL",
+      "decoder_pattern": "SS",
+      "sharing": "shared",
+      "rope": true,
+      "rope_theta": 10000.0,
+      "norm_eps": 1e-06,
+      "logit_cap": 15.0,
+      "tie_embeddings": true,
+      "attn_impl": "sdpa",
+      "memory_residual": false,
+      "memory_gate_bias": 2.0
+    },
+    "data": {
+      "kind": "synthetic",
+      "seq_len": 48,
+      "task": "delayed_recall",
+      "distances": [
+        8,
+        12,
+        16,
+        24
+      ],
+      "n_keys": 4,
+      "n_values": 2,
+      "n_filler": 8,
+      "n_distractors": 0,
+      "loss_on_answer_only": true,
+      "shard_dir": null,
+      "tokenizer_path": null,
+      "val_tokens": 2000000
+    },
+    "loss": {
+      "lam": 0.0,
+      "consistency": "none",
+      "detach_target": false,
+      "propagation_weight": 0.0,
+      "propagation_target": 1.0
+    },
+    "optim": {
+      "lr": 0.003,
+      "betas": [
+        0.9,
+        0.95
+      ],
+      "weight_decay": 0.1,
+      "warmup": 100,
+      "schedule": "cosine",
+      "grad_clip": 1.0,
+      "total_steps": 1500,
+      "global_tokens_per_step": 1536,
+      "micro_batch": 32,
+      "precision": "auto",
+      "compile": false,
+      "train_mode": "bptt"
+    },
+    "run": {
+      "name": "d768_plain_s0",
+      "seed": 0,
+      "out_dir": "ladder_runs",
+      "drive_dir": null,
+      "ckpt_every": 100,
+      "log_every": 500,
+      "eval_every": 500,
+      "heartbeat_secs": 60,
+      "wandb": false
+    }
+  }
+}

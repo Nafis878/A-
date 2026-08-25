@@ -1,0 +1,140 @@
+{
+  "name": "d128_res_s4",
+  "d_model": 128,
+  "arm": "res",
+  "seed": 4,
+  "n_params": 476036,
+  "final_ce": 3.725290076417309e-09,
+  "deployed": {
+    "8": {
+      "acc": 1.0,
+      "nll": 0.0,
+      "n": 128
+    },
+    "12": {
+      "acc": 1.0,
+      "nll": 2.793967557312982e-09,
+      "n": 128
+    },
+    "16": {
+      "acc": 1.0,
+      "nll": 1.8626450382086546e-09,
+      "n": 128
+    },
+    "24": {
+      "acc": 1.0,
+      "nll": 2.793967557312982e-09,
+      "n": 128
+    }
+  },
+  "parallel": {
+    "8": {
+      "acc": 0.515625,
+      "nll": 2.1872563886827265,
+      "n": 128
+    },
+    "12": {
+      "acc": 0.5078125,
+      "nll": 2.184594232356176,
+      "n": 128
+    },
+    "16": {
+      "acc": 0.5,
+      "nll": 2.180748968014086,
+      "n": 128
+    },
+    "24": {
+      "acc": 0.5,
+      "nll": 2.243784087437234,
+      "n": 128
+    }
+  },
+  "rho": 0.9996134837468466,
+  "sigma_max": 1.0773619016011555,
+  "ablation": 8.469412803649902,
+  "g_rec": 1.0051188468933105,
+  "g_loc": 0.9680240154266357,
+  "verdict": "chain live",
+  "spread": 0.02867867797613144,
+  "mem_norm": 13.929583549499512,
+  "mem_rank": 14.0,
+  "secs": 664.2658252716064,
+  "config": {
+    "model": {
+      "kind": "maglev",
+      "d_model": 128,
+      "n_layers": 2,
+      "n_heads": 4,
+      "n_kv_heads": 2,
+      "ffn_mult": 2.6667,
+      "vocab_size": 64,
+      "max_seq_len": 48,
+      "window": 4,
+      "prefiller_pattern": "SL",
+      "decoder_pattern": "SS",
+      "sharing": "shared",
+      "rope": true,
+      "rope_theta": 10000.0,
+      "norm_eps": 1e-06,
+      "logit_cap": 15.0,
+      "tie_embeddings": true,
+      "attn_impl": "sdpa",
+      "memory_residual": true,
+      "memory_gate_bias": 2.0
+    },
+    "data": {
+      "kind": "synthetic",
+      "seq_len": 48,
+      "task": "delayed_recall",
+      "distances": [
+        8,
+        12,
+        16,
+        24
+      ],
+      "n_keys": 4,
+      "n_values": 2,
+      "n_filler": 8,
+      "n_distractors": 0,
+      "loss_on_answer_only": true,
+      "shard_dir": null,
+      "tokenizer_path": null,
+      "val_tokens": 2000000
+    },
+    "loss": {
+      "lam": 0.0,
+      "consistency": "none",
+      "detach_target": false,
+      "propagation_weight": 0.0,
+      "propagation_target": 1.0
+    },
+    "optim": {
+      "lr": 0.003,
+      "betas": [
+        0.9,
+        0.95
+      ],
+      "weight_decay": 0.1,
+      "warmup": 100,
+      "schedule": "cosine",
+      "grad_clip": 1.0,
+      "total_steps": 1500,
+      "global_tokens_per_step": 1536,
+      "micro_batch": 32,
+      "precision": "auto",
+      "compile": false,
+      "train_mode": "bptt"
+    },
+    "run": {
+      "name": "d128_res_s4",
+      "seed": 4,
+      "out_dir": "ladder_runs",
+      "drive_dir": null,
+      "ckpt_every": 100,
+      "log_every": 500,
+      "eval_every": 500,
+      "heartbeat_secs": 60,
+      "wandb": false
+    }
+  }
+}

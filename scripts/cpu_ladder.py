@@ -66,6 +66,7 @@ import json
 import shutil
 import sys
 import time
+from math import comb
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -202,6 +203,38 @@ def run_cell(cell: Dict[str, Any], out_dir: Path) -> Dict[str, Any]:
     return payload
 
 
+def stratified_exact_p(strata: List[tuple]) -> float:
+    """Exact conditional test across rungs (a stratified Fisher / exact CMH).
+
+    No single rung has the power to matter here: with five seeds per arm the
+    smallest attainable p is 1/252 = 4e-3. But the rungs are not repeats of one
+    condition -- each is a different model size -- so pooling their counts into
+    one 2x2 table would silently claim they are exchangeable and inflate
+    significance. This conditions on each rung's own margins, which is the
+    stratified analogue of Fisher's test, and asks how often the identity arm
+    would take that many successes across ALL rungs by chance.
+
+    ``strata`` is a list of ``(k_identity, n_identity, k_plain, n_plain)``.
+    Under H0 the identity arm's successes in rung i are hypergeometric given
+    that rung's totals; the null distribution of their SUM is the convolution.
+    """
+    dist = {0: 1.0}
+    observed = 0
+    for k_res, n_res, k_plain, n_plain in strata:
+        total, successes = n_res + n_plain, k_res + k_plain
+        observed += k_res
+        nxt: Dict[int, float] = {}
+        lo = max(0, n_res - (total - successes))
+        hi = min(n_res, successes)
+        for x in range(lo, hi + 1):
+            px = (comb(successes, x) * comb(total - successes, n_res - x)
+                  / comb(total, n_res))
+            for s, ps in dist.items():
+                nxt[s + x] = nxt.get(s + x, 0.0) + ps * px
+        dist = nxt
+    return sum(p for s, p in dist.items() if s >= observed)
+
+
 def scored(payload: Dict[str, Any]) -> Dict[str, Any]:
     buckets = payload["deployed"]
     mean = sum(v["acc"] for v in buckets.values()) / len(buckets)
@@ -252,6 +285,26 @@ def summarise(out_dir: Path) -> None:
             _, pv = fisher_exact([[kr, nr - kr], [kp, np_ - kp]], alternative="greater")
             p_txt = f"{pv:.2e}"
         print(f"{d:>7} {n_par/1e6:>8.1f}M {kp:>6}/{np_:<6} {kr:>8}/{nr:<6} {p_txt:>10}")
+
+    strata = []
+    for d, _, _, _ in RUNGS:
+        at = [p for p in rows if p["d_model"] == d]
+        if not at:
+            continue
+        kr = sum(scored(p)["works"] for p in at if p["arm"] == "res")
+        nr = sum(1 for p in at if p["arm"] == "res")
+        kp = sum(scored(p)["works"] for p in at if p["arm"] == "plain")
+        npl = sum(1 for p in at if p["arm"] == "plain")
+        if nr and npl:
+            strata.append((kr, nr, kp, npl))
+    if len(strata) > 1:
+        tot_r = sum(s[0] for s in strata), sum(s[1] for s in strata)
+        tot_p = sum(s[2] for s in strata), sum(s[3] for s in strata)
+        print(f"\nacross {len(strata)} rungs, stratified by rung:")
+        print(f"  Maglev write rule  {tot_p[0]}/{tot_p[1]}")
+        print(f"  + identity path    {tot_r[0]}/{tot_r[1]}")
+        print(f"  exact conditional test (stratified Fisher):  "
+              f"p = {stratified_exact_p(strata):.2e}")
 
     print("\nreference, d=128 L=2 (established):  Maglev 3/10   identity 10/10   p=1.6e-3")
 

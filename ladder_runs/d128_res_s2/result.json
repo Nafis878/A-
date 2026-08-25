@@ -1,0 +1,140 @@
+{
+  "name": "d128_res_s2",
+  "d_model": 128,
+  "arm": "res",
+  "seed": 2,
+  "n_params": 476036,
+  "final_ce": 0.0,
+  "deployed": {
+    "8": {
+      "acc": 1.0,
+      "nll": 0.0,
+      "n": 128
+    },
+    "12": {
+      "acc": 1.0,
+      "nll": 0.0,
+      "n": 128
+    },
+    "16": {
+      "acc": 1.0,
+      "nll": 0.0,
+      "n": 128
+    },
+    "24": {
+      "acc": 1.0,
+      "nll": 0.0,
+      "n": 128
+    }
+  },
+  "parallel": {
+    "8": {
+      "acc": 0.515625,
+      "nll": 5.188766597746962,
+      "n": 128
+    },
+    "12": {
+      "acc": 0.515625,
+      "nll": 5.123033231620639,
+      "n": 128
+    },
+    "16": {
+      "acc": 0.515625,
+      "nll": 5.122947030109799,
+      "n": 128
+    },
+    "24": {
+      "acc": 0.5078125,
+      "nll": 5.20947434277582,
+      "n": 128
+    }
+  },
+  "rho": 0.9918569525082906,
+  "sigma_max": 0.9918832182884216,
+  "ablation": 10.1278715133667,
+  "g_rec": 1.051358938217163,
+  "g_loc": 0.9523389339447021,
+  "verdict": "chain live",
+  "spread": 0.023471077904105186,
+  "mem_norm": 15.31163501739502,
+  "mem_rank": 17.0,
+  "secs": 606.1458823680878,
+  "config": {
+    "model": {
+      "kind": "maglev",
+      "d_model": 128,
+      "n_layers": 2,
+      "n_heads": 4,
+      "n_kv_heads": 2,
+      "ffn_mult": 2.6667,
+      "vocab_size": 64,
+      "max_seq_len": 48,
+      "window": 4,
+      "prefiller_pattern": "SL",
+      "decoder_pattern": "SS",
+      "sharing": "shared",
+      "rope": true,
+      "rope_theta": 10000.0,
+      "norm_eps": 1e-06,
+      "logit_cap": 15.0,
+      "tie_embeddings": true,
+      "attn_impl": "sdpa",
+      "memory_residual": true,
+      "memory_gate_bias": 2.0
+    },
+    "data": {
+      "kind": "synthetic",
+      "seq_len": 48,
+      "task": "delayed_recall",
+      "distances": [
+        8,
+        12,
+        16,
+        24
+      ],
+      "n_keys": 4,
+      "n_values": 2,
+      "n_filler": 8,
+      "n_distractors": 0,
+      "loss_on_answer_only": true,
+      "shard_dir": null,
+      "tokenizer_path": null,
+      "val_tokens": 2000000
+    },
+    "loss": {
+      "lam": 0.0,
+      "consistency": "none",
+      "detach_target": false,
+      "propagation_weight": 0.0,
+      "propagation_target": 1.0
+    },
+    "optim": {
+      "lr": 0.003,
+      "betas": [
+        0.9,
+        0.95
+      ],
+      "weight_decay": 0.1,
+      "warmup": 100,
+      "schedule": "cosine",
+      "grad_clip": 1.0,
+      "total_steps": 1500,
+      "global_tokens_per_step": 1536,
+      "micro_batch": 32,
+      "precision": "auto",
+      "compile": false,
+      "train_mode": "bptt"
+    },
+    "run": {
+      "name": "d128_res_s2",
+      "seed": 2,
+      "out_dir": "ladder_runs",
+      "drive_dir": null,
+      "ckpt_every": 100,
+      "log_every": 500,
+      "eval_every": 500,
+      "heartbeat_secs": 60,
+      "wandb": false
+    }
+  }
+}
