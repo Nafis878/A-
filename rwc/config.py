@@ -439,10 +439,17 @@ class OptimConfig:
                 )
         if self.train_mode not in ("parallel", "bptt"):
             raise ConfigError(f"unknown optim.train_mode {self.train_mode!r}")
-        if self.train_mode == "bptt" and data.seq_len > 128:
+        # BPTT runs one sequential decoder step per position, so cost is linear
+        # in seq_len and a typo here is expensive rather than wrong. The cap was
+        # 128 while every study was synthetic (seq_len 48-128). The char-LM study
+        # needs 256 so that most of the position axis lies beyond the stacked
+        # local reach of 6, and 256 is measured at 1.30 s/step for d=128, L=2,
+        # micro_batch 16 -- about 33 min per 1500-step cell. 512 would be four
+        # hours a cell, which is a mistake rather than a choice.
+        if self.train_mode == "bptt" and data.seq_len > 256:
             raise ConfigError(
                 f"optim.train_mode='bptt' with seq_len={data.seq_len} runs "
-                f"{data.seq_len} sequential steps per forward; cap it at 128"
+                f"{data.seq_len} sequential steps per forward; cap it at 256"
             )
         if self.precision not in ("auto", "bf16", "fp16", "fp32"):
             raise ConfigError(f"unknown optim.precision {self.precision!r}")

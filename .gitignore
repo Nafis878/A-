@@ -31,3 +31,18 @@ ladder.log
 !/carry_runs/*/
 /carry_runs/*/*
 carry.log
+
+# text8 is 95 MB of corpus; re-fetched by the study, never committed.
+/lm_data/
+/lm_runs/*
+!/lm_runs/*/
+/lm_runs/*/*
+!/lm_runs/*/result.json
+/breadth_runs/*
+!/breadth_runs/*/
+/breadth_runs/*/*
+!/breadth_runs/*/result.json
+/depth_runs/*
+!/depth_runs/*/
+/depth_runs/*/*
+!/depth_runs/*/result.json
