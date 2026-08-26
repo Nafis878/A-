@@ -109,3 +109,96 @@ def test_every_archived_cell_carries_its_own_config() -> None:
         cfg = p.get("config", {})
         for key in ("model", "data", "optim", "loss", "run"):
             assert key in cfg, f"{name} is missing config.{key}"
+
+
+# --------------------------------------------------------------------------
+# The stratified test
+# --------------------------------------------------------------------------
+#
+# It exists in two places -- scripts/cpu_ladder.py (which produces the numbers)
+# and evidence/verify.py (which recomputes them from the archive). If those ever
+# disagree, the paper and its verification would quietly report different
+# p-values. These pin both to scipy and to each other.
+
+
+def _ladder_module():
+    spec = importlib.util.spec_from_file_location(
+        "_ladder", REPO / "scripts" / "cpu_ladder.py"
+    )
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules["_ladder"] = mod
+    spec.loader.exec_module(mod)
+    return mod
+
+
+@pytest.mark.parametrize(
+    "strata",
+    [
+        [(5, 5, 1, 5)],
+        [(10, 10, 3, 10)],
+        [(5, 5, 1, 5), (5, 5, 3, 5)],
+        [(5, 5, 1, 5), (5, 5, 3, 5), (5, 5, 2, 5)],
+        [(10, 10, 3, 10), (10, 10, 6, 10), (5, 5, 2, 5), (5, 5, 0, 5), (5, 5, 0, 5)],
+        [(3, 5, 3, 5), (2, 4, 2, 4)],
+    ],
+)
+def test_stratified_test_agrees_between_producer_and_verifier(strata) -> None:
+    mod = _verify_module()
+    ladder = _ladder_module()
+    assert mod.stratified_exact_p(strata) == pytest.approx(
+        ladder.stratified_exact_p(strata), rel=1e-12
+    )
+
+
+@pytest.mark.parametrize("k1,n1,k2,n2", [(5, 5, 1, 5), (10, 10, 3, 10), (3, 5, 3, 5)])
+def test_single_stratum_reduces_to_fisher(k1, n1, k2, n2) -> None:
+    """One stratum must give exactly Fisher's one-sided exact p."""
+    scipy_stats = pytest.importorskip("scipy.stats")
+    mod = _verify_module()
+    _, expected = scipy_stats.fisher_exact(
+        [[k1, n1 - k1], [k2, n2 - k2]], alternative="greater"
+    )
+    assert mod.stratified_exact_p([(k1, n1, k2, n2)]) == pytest.approx(
+        expected, rel=1e-9
+    )
+
+
+def test_stratifying_is_not_the_same_as_pooling() -> None:
+    """The reason this function exists at all.
+
+    Pooling strata into one 2x2 treats different model sizes as exchangeable
+    repeats of one condition and reports a smaller p than the data support.
+    """
+    mod = _verify_module()
+    strata = [(5, 5, 1, 5), (5, 5, 3, 5), (5, 5, 2, 5)]
+    stratified = mod.stratified_exact_p(strata)
+    pooled = mod.fisher_greater(
+        sum(s[0] for s in strata), sum(s[1] for s in strata),
+        sum(s[2] for s in strata), sum(s[3] for s in strata),
+    )
+    assert stratified > pooled, "stratifying must not be more permissive than pooling"
+
+
+@pytest.mark.skipif(
+    not list((REPO / "ladder_runs").glob("*/result.json")),
+    reason="width ladder not present",
+)
+def test_width_ladder_headline_holds() -> None:
+    """35/35 vs 11/35 across five rungs. Fails loudly if scoring drifts."""
+    mod = _verify_module()
+    rows = list(mod.load("*/result.json", REPO / "ladder_runs").values())
+    if len(rows) < 70:
+        pytest.skip(f"ladder incomplete ({len(rows)}/70)")
+    strata = []
+    for d in sorted({r["d_model"] for r in rows}):
+        at = [r for r in rows if r["d_model"] == d]
+        kr = sum(mod.learned(r) for r in at if r["arm"] == "res")
+        nr = sum(1 for r in at if r["arm"] == "res")
+        kp = sum(mod.learned(r) for r in at if r["arm"] == "plain")
+        npl = sum(1 for r in at if r["arm"] == "plain")
+        strata.append((kr, nr, kp, npl))
+    assert sum(s[0] for s in strata) == 35, "identity arm is no longer 35/35"
+    assert sum(s[1] for s in strata) == 35
+    assert sum(s[2] for s in strata) == 11, "write-rule arm moved off 11/35"
+    p = mod.stratified_exact_p(strata)
+    assert p == pytest.approx(8.80e-11, rel=0.05), f"stratified p moved to {p:.2e}"

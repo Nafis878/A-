@@ -32,7 +32,9 @@ against ~2.5 KB of result.json, and nothing here needs them.
 from __future__ import annotations
 
 import json
+import math
 import sys
+from itertools import product
 from math import comb
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
@@ -102,6 +104,44 @@ def fisher_greater(k1: int, n1: int, k2: int, n2: int) -> float:
         comb(row1, x) * comb(total - row1, col1 - x) / comb(total, col1)
         for x in range(lo, hi + 1) if x >= a
     )
+
+
+def stratified_exact_p(strata):
+    """Exact conditional test across strata (stratified Fisher / exact CMH).
+
+    Pooling strata into one 2x2 would treat different model sizes, tasks or
+    depths as exchangeable repeats of one condition. Conditioning on each
+    stratum's own margins does not. ``strata`` is a list of
+    ``(k_identity, n_identity, k_plain, n_plain)``. Reduces to Fisher's
+    one-sided exact test on a single stratum, which is asserted in
+    tests/test_evidence.py.
+    """
+    dist = {0: 1.0}
+    observed = 0
+    for k_res, n_res, k_plain, n_plain in strata:
+        total, successes = n_res + n_plain, k_res + k_plain
+        observed += k_res
+        nxt = {}
+        lo = max(0, n_res - (total - successes))
+        hi = min(n_res, successes)
+        for x in range(lo, hi + 1):
+            px = (comb(successes, x) * comb(total - successes, n_res - x)
+                  / comb(total, n_res))
+            for s, ps in dist.items():
+                nxt[s + x] = nxt.get(s + x, 0.0) + ps * px
+        dist = nxt
+    return sum(pr for s, pr in dist.items() if s >= observed)
+
+
+def arm_counts(rows, key):
+    """(k_identity, n_identity, k_plain, n_plain) per group, in group order."""
+    out = {}
+    for r in rows:
+        g = out.setdefault(r[key], {"plain": [0, 0], "res": [0, 0]})
+        cell = g[r["arm"]]
+        cell[0] += int(learned(r))
+        cell[1] += 1
+    return out
 
 
 def section(title: str) -> None:
@@ -175,18 +215,84 @@ def main() -> int:
 
     ladder = load("*/result.json", HERE.parent / "ladder_runs")
     if ladder:
-        section(f"WIDTH LADDER  ({len(ladder)}/50 cells complete)")
+        section(f"WIDTH LADDER  ({len(ladder)}/70 cells)")
         print(f"  {'rung':>6} {'non-emb':>9} {'Maglev':>9} {'identity':>10} "
               f"{'Fisher p':>10}")
+        strata = []
         for d in sorted({p["d_model"] for p in ladder.values()}):
             at = [p for p in ladder.values() if p["d_model"] == d]
             kp2 = sum(learned(p) for p in at if p["arm"] == "plain")
             np2 = sum(1 for p in at if p["arm"] == "plain")
             kr2 = sum(learned(p) for p in at if p["arm"] == "res")
             nr2 = sum(1 for p in at if p["arm"] == "res")
+            if np2 and nr2:
+                strata.append((kr2, nr2, kp2, np2))
             pv = f"{fisher_greater(kr2, nr2, kp2, np2):.2e}" if np2 and nr2 else "  --"
             print(f"  {d:>6} {at[0]['n_params'] / 1e6:>8.1f}M {kp2:>5}/{np2:<3} "
                   f"{kr2:>6}/{nr2:<3} {pv:>10}")
+        if len(strata) > 1:
+            print(f"  stratified across {len(strata)} rungs: "
+                  f"{sum(s[0] for s in strata)}/{sum(s[1] for s in strata)} vs "
+                  f"{sum(s[2] for s in strata)}/{sum(s[3] for s in strata)}, "
+                  f"p = {stratified_exact_p(strata):.2e}")
+
+    # ---- task breadth and depth, same shape, different variable -----------
+    for label, folder, key in (
+        ("TASK BREADTH  (16 values, distractors)", "breadth_runs", "variant"),
+        ("DEPTH LADDER  (L in 2, 4, 8; distance/reach held at 1.3x-4x)",
+         "depth_runs", "variant"),
+    ):
+        rows = list(load("*/result.json", HERE.parent / folder).values())
+        if not rows:
+            continue
+        section(f"{label}  ({len(rows)} cells)")
+        counts = arm_counts(rows, key)
+        strata = []
+        print(f"  {'variant':>10} {'task':<15} {'L':>2} {'reach':>6} "
+              f"{'Maglev':>9} {'identity':>10} {'p':>10}")
+        for variant, c in counts.items():
+            one = next(r for r in rows if r[key] == variant)
+            (kp2, np2), (kr2, nr2) = c["plain"], c["res"]
+            if np2 and nr2:
+                strata.append((kr2, nr2, kp2, np2))
+            pv = f"{stratified_exact_p([(kr2, nr2, kp2, np2)]):.2e}" if np2 and nr2 else "  --"
+            print(f"  {variant:>10} {one.get('task', '?'):<15} "
+                  f"{one.get('n_layers', 0):>2} {one.get('local_reach', 0):>6} "
+                  f"{kp2:>5}/{np2:<3} {kr2:>6}/{nr2:<3} {pv:>10}")
+        if len(strata) > 1:
+            print(f"  stratified: {sum(s[0] for s in strata)}/"
+                  f"{sum(s[1] for s in strata)} vs {sum(s[2] for s in strata)}/"
+                  f"{sum(s[3] for s in strata)}, "
+                  f"p = {stratified_exact_p(strata):.2e}")
+
+    # ---- the language model ------------------------------------------------
+    lm = list(load("*/result.json", HERE.parent / "lm_runs").values())
+    if lm:
+        section(f"CHARACTER-LEVEL LM  ({len(lm)} cells, {lm[0]['corpus']})")
+        print(f"  uniform baseline log2({lm[0]['vocab_size']}) = "
+              f"{math.log2(lm[0]['vocab_size']):.3f} bpc; a 6-character window is")
+        print("  pathological for text, so absolute BPB is poor BY DESIGN and the")
+        print("  claim is comparative. What isolates the channel is how many bits")
+        print("  memory buys over the same weights with memory zeroed.")
+        print(f"\n  {'cell':<16} {'bpb live':>9} {'bpb dead':>9} "
+              f"{'memory buys':>12} {'rho':>7}")
+        for r in sorted(lm, key=lambda x: (x["arm"], x["seed"])):
+            print(f"  {r['name']:<16} {r['bpb_live']:>9.4f} {r['bpb_dead']:>9.4f} "
+                  f"{r['benefit']:>+12.4f} {r['rho']:>7.3f}")
+        by_arm = {}
+        for r in lm:
+            by_arm.setdefault(r["arm"], {})[r["seed"]] = r
+        shared = sorted(set(by_arm.get("plain", {})) & set(by_arm.get("res", {})))
+        if len(shared) >= 2:
+            deltas = [by_arm["res"][s]["benefit"] - by_arm["plain"][s]["benefit"]
+                      for s in shared]
+            mean = sum(deltas) / len(deltas)
+            signs = list(product([1, -1], repeat=len(deltas)))
+            ge = sum(1 for sg in signs
+                     if sum(x * y for x, y in zip(deltas, sg)) / len(deltas) >= mean)
+            print(f"\n  paired by seed, identity minus write rule: {mean:+.4f} bits")
+            print(f"  one-sided paired permutation p = {ge / len(signs):.4f} "
+                  f"(floor 1/{2 ** len(deltas)} = {1 / 2 ** len(deltas):.3f})")
 
     for name in ("rwc_results", "headline_rwc_results", "calibration_results"):
         runs = load(f"{name}/*/result.json")
