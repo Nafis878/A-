@@ -29,7 +29,36 @@ distance axis: a model whose memory is dead can improve only until its context
 fills the local reach and must then flatten, while a live channel keeps
 improving.
 
-A null result here is a real outcome and is reported as found.
+A null result here is a real outcome and is reported as found. IT IS WHAT
+HAPPENED.
+
+=== RESULT (5 seeds per arm, 1500 steps, text8) ===
+
+    arm        bpb_live   bpb_dead   memory buys   rho
+    plain        1.9089     3.4290      +1.5201    0.27-0.43
+    identity     1.9723     3.5805      +1.6082    1.000
+
+Maglev's write rule is NOT broken here. Its memory channel is alive -- rho 0.27
+to 0.43, against ~0.002 in a failed synthetic cell -- and buys it 1.52 bits.
+
+And the identity path makes the language model WORSE, on every seed: 1.9723 vs
+1.9089 bpc, 0/5 seeds favouring it, one-sided permutation p = 1.0.
+
+READ `benefit` WITH CARE: IT IS CONFOUNDED. ``benefit = bpb_dead - bpb_live``
+rewards having a WORSE local baseline. The identity path's apparent +0.088 bit
+advantage comes entirely from its ablated model being worse (3.5805 vs 3.4290),
+not from its deployed model being better. On the metric that matters -- how good
+the language model is -- it loses on all five seeds. Even the flattering metric
+reaches only p = 0.0625, which does not clear 0.05. Do not quote `benefit` as
+evidence for the intervention.
+
+WHAT THIS NARROWS THE CLAIM TO. Character LM never requires preserving one
+discrete fact unchanged across a long gap; it requires aggregating diffuse local
+statistics, which the write rule does perfectly well without ever needing a
+latch. The synthetic probe is precisely a long-range EXACT retrieval task, which
+is where a latch is required and where the write rule fails 24 times in 35. So
+the defensible claim is that the write rule fails at long-range exact retrieval,
+not that it fails at language modelling.
 
 Usage:
     python scripts/lm_study.py --out-dir lm_runs
@@ -182,13 +211,20 @@ def summarise(out_dir: Path) -> None:
     by_arm = {}
     for r in rows:
         by_arm.setdefault(r["arm"], {})[r["seed"]] = r
-    print(f"\n{'arm':<16} {'n':>3} {'mean bits bought by memory':>28}")
-    print("-" * 50)
+    print(f"\n{'arm':<16} {'n':>3} {'bpb_live':>10} {'bpb_dead':>10} "
+          f"{'memory buys':>13}")
+    print("-" * 54)
     for arm in ("plain", "res"):
         cells_ = by_arm.get(arm, {})
         if cells_:
-            vals = [c["benefit"] for c in cells_.values()]
-            print(f"{arm:<16} {len(vals):>3} {sum(vals) / len(vals):>+28.4f}")
+            n = len(cells_)
+            print(f"{arm:<16} {n:>3} "
+                  f"{sum(c['bpb_live'] for c in cells_.values()) / n:>10.4f} "
+                  f"{sum(c['bpb_dead'] for c in cells_.values()) / n:>10.4f} "
+                  f"{sum(c['benefit'] for c in cells_.values()) / n:>+13.4f}")
+    print("bpb_live is the language model's actual quality: LOWER IS BETTER.")
+    print("'memory buys' = dead - live is CONFOUNDED: it rewards a worse local")
+    print("baseline, so a worse model can post a larger number.")
 
     shared = sorted(set(by_arm.get("plain", {})) & set(by_arm.get("res", {})))
     if len(shared) >= 2:
@@ -201,6 +237,16 @@ def summarise(out_dir: Path) -> None:
               f"one-sided paired permutation p = {paired_permutation(deltas):.4f}")
         print(f"  (floor with {len(shared)} seeds is 1/{2 ** len(shared)} = "
               f"{1 / 2 ** len(shared):.3f})")
+
+        # The metric that is not confounded: how good is the language model.
+        live = [by_arm["res"][s]["bpb_live"] - by_arm["plain"][s]["bpb_live"]
+                for s in shared]
+        wins = sum(1 for d in live if d < 0)
+        mean = sum(live) / len(live)
+        print("\n  LM QUALITY (bpb_live, lower is better) -- not confounded:")
+        print(f"  per seed: {[round(d, 4) for d in live]}")
+        print(f"  identity path better on {wins}/{len(live)} seeds, "
+              f"mean {mean:+.4f} bpc -- {'WORSE' if mean > 0 else 'better'}")
 
     print(f"\nbits bought by memory, BY POSITION -- reach is 6, so a dead")
     print(f"channel must flatten past bucket 0-8 and a live one keeps gaining")
