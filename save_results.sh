@@ -21,9 +21,14 @@ EXPECTED=$((70 + 10 + 30 + 30))   # ladder + lm + breadth + depth
 while true; do
   sleep "$INTERVAL"
 
-  git add ladder_runs/*/result.json lm_runs/*/result.json \
-          breadth_runs/*/result.json depth_runs/*/result.json \
-          carry_runs/*.json 2>/dev/null
+  # One directory at a time, each guarded. `git add a/* b/*` exits 128 and
+  # stages NOTHING if any single pathspec matches no files -- so while
+  # breadth_runs is still empty it would silently discard the LM results it was
+  # meant to be saving. Adding a directory (not a glob) also lets .gitignore do
+  # the filtering, so only result.json is picked up.
+  for d in ladder_runs lm_runs breadth_runs depth_runs carry_runs; do
+    [ -d "$d" ] && git add "$d" 2>/dev/null
+  done
 
   if ! git diff --cached --quiet 2>/dev/null; then
     n=$(git diff --cached --name-only | wc -l)
