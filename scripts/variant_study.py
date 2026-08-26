@@ -37,6 +37,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import itertools
 import json
 import shutil
 import sys
@@ -239,6 +240,35 @@ def summarise(study: str, out_dir: Path) -> None:
             pv = "  --"
         print(f"{variant:>10} {at[0]['task']:<15} {at[0]['n_params'] / 1e6:>7.1f}M "
               f"{kp:>5}/{npl:<3} {kr:>6}/{nr:<3} {pv:>10}")
+
+    # At 16 values the binary "works" rate is the wrong readout. It was built for
+    # the 2-value task, whose outcome is bimodal -- 1.000 or chance -- so a
+    # threshold loses nothing. With 16 values the outcome is GRADED and the
+    # Wilson bound for chance sits near 0.09, so a cell at 0.143 counts as
+    # "LEARNED" beside one at 0.906 and a sixfold gap is thrown away. Report the
+    # accuracy itself, paired by seed.
+    print(f"\n{'variant':>10} {'plain acc':>10} {'identity acc':>13} "
+          f"{'ratio':>7} {'paired p':>9}")
+    print("-" * 54)
+    for variant in order:
+        at = [p for p in rows if p["variant"] == variant]
+        if not at:
+            continue
+        pl = {p["seed"]: scored(p)["mean"] for p in at if p["arm"] == "plain"}
+        rs = {p["seed"]: scored(p)["mean"] for p in at if p["arm"] == "res"}
+        shared = sorted(set(pl) & set(rs))
+        if not shared:
+            continue
+        mp = sum(pl[s] for s in shared) / len(shared)
+        mr = sum(rs[s] for s in shared) / len(shared)
+        d = [rs[s] - pl[s] for s in shared]
+        mean = sum(d) / len(d)
+        signs = list(itertools.product([1, -1], repeat=len(d)))
+        pv = sum(1 for sg in signs
+                 if sum(a * b for a, b in zip(d, sg)) / len(d) >= mean) / len(signs)
+        print(f"{variant:>10} {mp:>10.3f} {mr:>13.3f} "
+              f"{mr / max(mp, 1e-9):>6.1f}x {pv:>9.4f}")
+    print("paired permutation over seeds; floor is 1/2^n_seeds")
 
     if len(strata) > 1:
         print(f"\nacross {len(strata)} variants, stratified:")
