@@ -1,0 +1,140 @@
+{
+  "name": "d768_res_s3",
+  "d_model": 768,
+  "arm": "res",
+  "seed": 3,
+  "n_params": 16225540,
+  "final_ce": 0.0,
+  "deployed": {
+    "8": {
+      "acc": 1.0,
+      "nll": 0.0,
+      "n": 128
+    },
+    "12": {
+      "acc": 1.0,
+      "nll": 0.0,
+      "n": 128
+    },
+    "16": {
+      "acc": 1.0,
+      "nll": 0.0,
+      "n": 128
+    },
+    "24": {
+      "acc": 1.0,
+      "nll": 0.0,
+      "n": 128
+    }
+  },
+  "parallel": {
+    "8": {
+      "acc": 1.0,
+      "nll": 4.002765269073283e-06,
+      "n": 128
+    },
+    "12": {
+      "acc": 1.0,
+      "nll": 3.058448096004973e-06,
+      "n": 128
+    },
+    "16": {
+      "acc": 1.0,
+      "nll": 2.6491384477855817e-05,
+      "n": 128
+    },
+    "24": {
+      "acc": 1.0,
+      "nll": 0.00022222736822286038,
+      "n": 128
+    }
+  },
+  "rho": 0.9999991854031881,
+  "sigma_max": 1.0432017644246419,
+  "ablation": 8.602815628051758,
+  "g_rec": 1.0062931776046753,
+  "g_loc": 0.9184436202049255,
+  "verdict": "chain live",
+  "spread": 0.012624089606106281,
+  "mem_norm": 24.855539321899414,
+  "mem_rank": 34.0,
+  "secs": 2866.564493894577,
+  "config": {
+    "model": {
+      "kind": "maglev",
+      "d_model": 768,
+      "n_layers": 2,
+      "n_heads": 12,
+      "n_kv_heads": 6,
+      "ffn_mult": 2.6667,
+      "vocab_size": 64,
+      "max_seq_len": 48,
+      "window": 4,
+      "prefiller_pattern": "SL",
+      "decoder_pattern": "SS",
+      "sharing": "shared",
+      "rope": true,
+      "rope_theta": 10000.0,
+      "norm_eps": 1e-06,
+      "logit_cap": 15.0,
+      "tie_embeddings": true,
+      "attn_impl": "sdpa",
+      "memory_residual": true,
+      "memory_gate_bias": 2.0
+    },
+    "data": {
+      "kind": "synthetic",
+      "seq_len": 48,
+      "task": "delayed_recall",
+      "distances": [
+        8,
+        12,
+        16,
+        24
+      ],
+      "n_keys": 4,
+      "n_values": 2,
+      "n_filler": 8,
+      "n_distractors": 0,
+      "loss_on_answer_only": true,
+      "shard_dir": null,
+      "tokenizer_path": null,
+      "val_tokens": 2000000
+    },
+    "loss": {
+      "lam": 0.0,
+      "consistency": "none",
+      "detach_target": false,
+      "propagation_weight": 0.0,
+      "propagation_target": 1.0
+    },
+    "optim": {
+      "lr": 0.003,
+      "betas": [
+        0.9,
+        0.95
+      ],
+      "weight_decay": 0.1,
+      "warmup": 100,
+      "schedule": "cosine",
+      "grad_clip": 1.0,
+      "total_steps": 1500,
+      "global_tokens_per_step": 1536,
+      "micro_batch": 32,
+      "precision": "auto",
+      "compile": false,
+      "train_mode": "bptt"
+    },
+    "run": {
+      "name": "d768_res_s3",
+      "seed": 3,
+      "out_dir": "ladder_runs",
+      "drive_dir": null,
+      "ckpt_every": 100,
+      "log_every": 500,
+      "eval_every": 500,
+      "heartbeat_secs": 60,
+      "wandb": false
+    }
+  }
+}

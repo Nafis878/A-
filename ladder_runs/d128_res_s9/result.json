@@ -1,0 +1,140 @@
+{
+  "name": "d128_res_s9",
+  "d_model": 128,
+  "arm": "res",
+  "seed": 9,
+  "n_params": 476036,
+  "final_ce": 0.0,
+  "deployed": {
+    "8": {
+      "acc": 1.0,
+      "nll": 0.0,
+      "n": 128
+    },
+    "12": {
+      "acc": 1.0,
+      "nll": 0.0,
+      "n": 128
+    },
+    "16": {
+      "acc": 1.0,
+      "nll": 9.313225191043273e-10,
+      "n": 128
+    },
+    "24": {
+      "acc": 1.0,
+      "nll": 3.725290076417309e-09,
+      "n": 128
+    }
+  },
+  "parallel": {
+    "8": {
+      "acc": 0.53125,
+      "nll": 5.139756626388035,
+      "n": 128
+    },
+    "12": {
+      "acc": 0.4296875,
+      "nll": 6.251087751161975,
+      "n": 128
+    },
+    "16": {
+      "acc": 0.4609375,
+      "nll": 5.91069837736643,
+      "n": 128
+    },
+    "24": {
+      "acc": 0.4140625,
+      "nll": 6.419642417500228,
+      "n": 128
+    }
+  },
+  "rho": 0.9996193250020345,
+  "sigma_max": 1.0422598123550415,
+  "ablation": 6.695023536682129,
+  "g_rec": 1.0234079360961914,
+  "g_loc": 0.9374830722808838,
+  "verdict": "chain live",
+  "spread": 0.019744470715522766,
+  "mem_norm": 15.768035888671875,
+  "mem_rank": 16.0,
+  "secs": 440.701007604599,
+  "config": {
+    "model": {
+      "kind": "maglev",
+      "d_model": 128,
+      "n_layers": 2,
+      "n_heads": 4,
+      "n_kv_heads": 2,
+      "ffn_mult": 2.6667,
+      "vocab_size": 64,
+      "max_seq_len": 48,
+      "window": 4,
+      "prefiller_pattern": "SL",
+      "decoder_pattern": "SS",
+      "sharing": "shared",
+      "rope": true,
+      "rope_theta": 10000.0,
+      "norm_eps": 1e-06,
+      "logit_cap": 15.0,
+      "tie_embeddings": true,
+      "attn_impl": "sdpa",
+      "memory_residual": true,
+      "memory_gate_bias": 2.0
+    },
+    "data": {
+      "kind": "synthetic",
+      "seq_len": 48,
+      "task": "delayed_recall",
+      "distances": [
+        8,
+        12,
+        16,
+        24
+      ],
+      "n_keys": 4,
+      "n_values": 2,
+      "n_filler": 8,
+      "n_distractors": 0,
+      "loss_on_answer_only": true,
+      "shard_dir": null,
+      "tokenizer_path": null,
+      "val_tokens": 2000000
+    },
+    "loss": {
+      "lam": 0.0,
+      "consistency": "none",
+      "detach_target": false,
+      "propagation_weight": 0.0,
+      "propagation_target": 1.0
+    },
+    "optim": {
+      "lr": 0.003,
+      "betas": [
+        0.9,
+        0.95
+      ],
+      "weight_decay": 0.1,
+      "warmup": 100,
+      "schedule": "cosine",
+      "grad_clip": 1.0,
+      "total_steps": 1500,
+      "global_tokens_per_step": 1536,
+      "micro_batch": 32,
+      "precision": "auto",
+      "compile": false,
+      "train_mode": "bptt"
+    },
+    "run": {
+      "name": "d128_res_s9",
+      "seed": 9,
+      "out_dir": "ladder_runs",
+      "drive_dir": null,
+      "ckpt_every": 100,
+      "log_every": 500,
+      "eval_every": 500,
+      "heartbeat_secs": 60,
+      "wandb": false
+    }
+  }
+}

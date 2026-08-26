@@ -1,0 +1,140 @@
+{
+  "name": "d128_plain_s9",
+  "d_model": 128,
+  "arm": "plain",
+  "seed": 9,
+  "n_params": 459524,
+  "final_ce": 0.6960116624832153,
+  "deployed": {
+    "8": {
+      "acc": 0.53125,
+      "nll": 0.6925495988689363,
+      "n": 128
+    },
+    "12": {
+      "acc": 0.4296875,
+      "nll": 0.6948014781810343,
+      "n": 128
+    },
+    "16": {
+      "acc": 0.4609375,
+      "nll": 0.6941086105071008,
+      "n": 128
+    },
+    "24": {
+      "acc": 0.4140625,
+      "nll": 0.6951482258737087,
+      "n": 128
+    }
+  },
+  "parallel": {
+    "8": {
+      "acc": 0.53125,
+      "nll": 0.6925495942123234,
+      "n": 128
+    },
+    "12": {
+      "acc": 0.4296875,
+      "nll": 0.6948014283552766,
+      "n": 128
+    },
+    "16": {
+      "acc": 0.4609375,
+      "nll": 0.694108588155359,
+      "n": 128
+    },
+    "24": {
+      "acc": 0.4140625,
+      "nll": 0.6951481644064188,
+      "n": 128
+    }
+  },
+  "rho": 0.0010423858572418492,
+  "sigma_max": 0.003468587761744857,
+  "ablation": 0.03326606750488281,
+  "g_rec": 0.3984937071800232,
+  "g_loc": 0.9659569263458252,
+  "verdict": "WRITE SEVERED: no linear channel across steps",
+  "spread": 0.0011617901036515832,
+  "mem_norm": 5.436014175415039,
+  "mem_rank": 20.0,
+  "secs": 424.3167140483856,
+  "config": {
+    "model": {
+      "kind": "maglev",
+      "d_model": 128,
+      "n_layers": 2,
+      "n_heads": 4,
+      "n_kv_heads": 2,
+      "ffn_mult": 2.6667,
+      "vocab_size": 64,
+      "max_seq_len": 48,
+      "window": 4,
+      "prefiller_pattern": "SL",
+      "decoder_pattern": "SS",
+      "sharing": "shared",
+      "rope": true,
+      "rope_theta": 10000.0,
+      "norm_eps": 1e-06,
+      "logit_cap": 15.0,
+      "tie_embeddings": true,
+      "attn_impl": "sdpa",
+      "memory_residual": false,
+      "memory_gate_bias": 2.0
+    },
+    "data": {
+      "kind": "synthetic",
+      "seq_len": 48,
+      "task": "delayed_recall",
+      "distances": [
+        8,
+        12,
+        16,
+        24
+      ],
+      "n_keys": 4,
+      "n_values": 2,
+      "n_filler": 8,
+      "n_distractors": 0,
+      "loss_on_answer_only": true,
+      "shard_dir": null,
+      "tokenizer_path": null,
+      "val_tokens": 2000000
+    },
+    "loss": {
+      "lam": 0.0,
+      "consistency": "none",
+      "detach_target": false,
+      "propagation_weight": 0.0,
+      "propagation_target": 1.0
+    },
+    "optim": {
+      "lr": 0.003,
+      "betas": [
+        0.9,
+        0.95
+      ],
+      "weight_decay": 0.1,
+      "warmup": 100,
+      "schedule": "cosine",
+      "grad_clip": 1.0,
+      "total_steps": 1500,
+      "global_tokens_per_step": 1536,
+      "micro_batch": 32,
+      "precision": "auto",
+      "compile": false,
+      "train_mode": "bptt"
+    },
+    "run": {
+      "name": "d128_plain_s9",
+      "seed": 9,
+      "out_dir": "ladder_runs",
+      "drive_dir": null,
+      "ckpt_every": 100,
+      "log_every": 500,
+      "eval_every": 500,
+      "heartbeat_secs": 60,
+      "wandb": false
+    }
+  }
+}

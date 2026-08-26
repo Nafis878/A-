@@ -1,0 +1,140 @@
+{
+  "name": "d1024_plain_s4",
+  "d_model": 1024,
+  "arm": "plain",
+  "seed": 4,
+  "n_params": 27400196,
+  "final_ce": 0.6932082176208496,
+  "deployed": {
+    "8": {
+      "acc": 0.515625,
+      "nll": 0.69313695281744,
+      "n": 128
+    },
+    "12": {
+      "acc": 0.5078125,
+      "nll": 0.693142119795084,
+      "n": 128
+    },
+    "16": {
+      "acc": 0.5,
+      "nll": 0.6931471712887287,
+      "n": 128
+    },
+    "24": {
+      "acc": 0.5,
+      "nll": 0.693147100508213,
+      "n": 128
+    }
+  },
+  "parallel": {
+    "8": {
+      "acc": 0.515625,
+      "nll": 0.69313695281744,
+      "n": 128
+    },
+    "12": {
+      "acc": 0.5078125,
+      "nll": 0.693142119795084,
+      "n": 128
+    },
+    "16": {
+      "acc": 0.5,
+      "nll": 0.6931471675634384,
+      "n": 128
+    },
+    "24": {
+      "acc": 0.5,
+      "nll": 0.693147100508213,
+      "n": 128
+    }
+  },
+  "rho": 0.000341384361187617,
+  "sigma_max": 0.0070531403956313925,
+  "ablation": 0.08646297454833984,
+  "g_rec": 0.9433319568634033,
+  "g_loc": 0.9645434617996216,
+  "verdict": "WRITE SEVERED: no linear channel across steps",
+  "spread": 0.00019910733681172132,
+  "mem_norm": 32.89097213745117,
+  "mem_rank": 42.0,
+  "secs": 4023.4212572574615,
+  "config": {
+    "model": {
+      "kind": "maglev",
+      "d_model": 1024,
+      "n_layers": 2,
+      "n_heads": 16,
+      "n_kv_heads": 8,
+      "ffn_mult": 2.6667,
+      "vocab_size": 64,
+      "max_seq_len": 48,
+      "window": 4,
+      "prefiller_pattern": "SL",
+      "decoder_pattern": "SS",
+      "sharing": "shared",
+      "rope": true,
+      "rope_theta": 10000.0,
+      "norm_eps": 1e-06,
+      "logit_cap": 15.0,
+      "tie_embeddings": true,
+      "attn_impl": "sdpa",
+      "memory_residual": false,
+      "memory_gate_bias": 2.0
+    },
+    "data": {
+      "kind": "synthetic",
+      "seq_len": 48,
+      "task": "delayed_recall",
+      "distances": [
+        8,
+        12,
+        16,
+        24
+      ],
+      "n_keys": 4,
+      "n_values": 2,
+      "n_filler": 8,
+      "n_distractors": 0,
+      "loss_on_answer_only": true,
+      "shard_dir": null,
+      "tokenizer_path": null,
+      "val_tokens": 2000000
+    },
+    "loss": {
+      "lam": 0.0,
+      "consistency": "none",
+      "detach_target": false,
+      "propagation_weight": 0.0,
+      "propagation_target": 1.0
+    },
+    "optim": {
+      "lr": 0.003,
+      "betas": [
+        0.9,
+        0.95
+      ],
+      "weight_decay": 0.1,
+      "warmup": 100,
+      "schedule": "cosine",
+      "grad_clip": 1.0,
+      "total_steps": 1500,
+      "global_tokens_per_step": 1536,
+      "micro_batch": 32,
+      "precision": "auto",
+      "compile": false,
+      "train_mode": "bptt"
+    },
+    "run": {
+      "name": "d1024_plain_s4",
+      "seed": 4,
+      "out_dir": "ladder_runs",
+      "drive_dir": null,
+      "ckpt_every": 100,
+      "log_every": 500,
+      "eval_every": 500,
+      "heartbeat_secs": 60,
+      "wandb": false
+    }
+  }
+}
