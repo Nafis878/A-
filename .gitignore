@@ -48,3 +48,7 @@ carry.log
 !/depth_runs/*/result.json
 
 *.log
+/lm_ind_runs/*
+!/lm_ind_runs/*/
+/lm_ind_runs/*/*
+!/lm_ind_runs/*/result.json

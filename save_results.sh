@@ -16,7 +16,7 @@
 
 cd "$(dirname "$0")" || exit 1
 INTERVAL=${1:-900}          # seconds between checks
-EXPECTED=$((70 + 10 + 30 + 30))   # ladder + lm + breadth + depth
+EXPECTED=$((70 + 10 + 15 + 30 + 30))   # ladder + lm + lm_induction + breadth + depth
 
 while true; do
   sleep "$INTERVAL"
@@ -26,7 +26,7 @@ while true; do
   # breadth_runs is still empty it would silently discard the LM results it was
   # meant to be saving. Adding a directory (not a glob) also lets .gitignore do
   # the filtering, so only result.json is picked up.
-  for d in ladder_runs lm_runs breadth_runs depth_runs carry_runs; do
+  for d in ladder_runs lm_runs lm_ind_runs breadth_runs depth_runs carry_runs; do
     [ -d "$d" ] && git add "$d" 2>/dev/null
   done
 

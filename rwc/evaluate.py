@@ -21,7 +21,8 @@ from torch import Tensor, nn
 
 from .data.synthetic import ProbeBatch, SyntheticGenerator
 
-__all__ = ["probe_accuracy", "ProbeResult", "bits_per_byte", "lm_memory_benefit"]
+__all__ = ["probe_accuracy", "ProbeResult", "bits_per_byte",
+           "lm_memory_benefit", "lm_induction_bpb", "induction_positions"]
 
 ProbeResult = Dict[str, Dict[str, float]]
 
@@ -184,5 +185,150 @@ def lm_memory_benefit(
         "benefit": bpb(float((dead_pos - live_pos).mean())),
         "by_position": by_position,
         "n_positions": n,
+        "n_sequences": n_batches * batch_size,
+    }
+
+
+# --------------------------------------------------------------------------
+# Long-range exact retrieval inside natural text
+# --------------------------------------------------------------------------
+#
+# Aggregate BPB cannot test the claim, and that is measurable rather than
+# arguable. On held-out text8 only 3.87% of positions are ones where the next
+# character is fixed by a substring that last occurred beyond the decoder's
+# reach. The other 96% are predictable from the last few characters, so a defect
+# confined to long-range exact copies is averaged into invisibility.
+#
+# But "the context repeated" is not yet the right filter either. Most repeats are
+# common phrases -- " the was", " of the " -- whose continuation local statistics
+# already supply, so they test nothing. Measured: an UNTRAINED model scores
+# BETTER on raw induction positions than on ordinary ones. Filtering to
+# substrings that never occur in a large sample of the training corpus leaves
+# 12.6% of them, 0.49% of all positions, median distance 72 characters. Those are
+# the ones where the continuation can only come from this context.
+#
+# So three groups are reported, never one:
+#
+#   induction_novel   repeat, and the substring is absent from training
+#                     -> genuine long-range exact retrieval
+#   induction_common  repeat, but the substring is common in training
+#                     -> local statistics suffice; a control
+#   other             everything else
+#
+# An arm that wins on `induction_novel` while losing on `other` has made a
+# trade-off, and reporting only the flattering half would be the same error as
+# quoting the confounded `benefit` metric above.
+
+
+def build_reference(text: str, min_match: int = 8, n_chars: int = 3_000_000) -> set:
+    """Substrings of length ``min_match`` occurring in a training sample."""
+    sample = text[:n_chars]
+    return {sample[i:i + min_match] for i in range(len(sample) - min_match)}
+
+
+def induction_positions(
+    seq_bytes: bytes,
+    *,
+    min_match: int,
+    reach: int,
+    alphabet: Optional[str] = None,
+    reference: Optional[set] = None,
+):
+    """[(position, distance, is_novel)] where the context repeats from beyond reach.
+
+    ``is_novel`` is True when the repeated substring is absent from ``reference``
+    -- i.e. the continuation cannot be supplied by training statistics and must
+    come from this context. Without a reference every hit is reported as novel.
+    """
+    out = []
+    for t in range(min_match, len(seq_bytes)):
+        pat = seq_bytes[t - min_match:t]
+        prev = seq_bytes.rfind(pat, 0, t - min_match)
+        if prev < 0:
+            continue
+        distance = t - min_match - prev
+        if distance <= reach:
+            continue
+        novel = True
+        if reference is not None and alphabet is not None:
+            novel = "".join(alphabet[c] for c in pat) not in reference
+        out.append((t, distance, novel))
+    return out
+
+
+@torch.no_grad()
+def lm_induction_bpb(
+    model: nn.Module,
+    loader,
+    *,
+    reference: Optional[set] = None,
+    n_batches: int = 200,
+    batch_size: int = 8,
+    min_match: int = 8,
+    buckets: Optional[List[int]] = None,
+    device: Optional[torch.device] = None,
+) -> Dict[str, object]:
+    """Held-out BPB split into novel-induction, common-induction and other."""
+    buckets = buckets or [7, 16, 32, 64, 128, 256]
+    reach = model.cfg.n_layers * (model.cfg.window - 1)
+    alphabet = getattr(loader, "alphabet", None)
+
+    novel: List[float] = []
+    novel_d: List[int] = []
+    common: List[float] = []
+    other: List[float] = []
+
+    was_training = model.training
+    model.eval()
+    try:
+        for i in range(n_batches):
+            batch = loader.batch(i, batch_size)
+            tokens = batch.tokens.to(device) if device is not None else batch.tokens
+            targets = batch.targets.to(tokens.device)
+            logits = model.forward_recurrent(tokens).logits
+            nll = torch.nn.functional.cross_entropy(
+                logits.reshape(-1, logits.shape[-1]).float(),
+                targets.reshape(-1), reduction="none",
+            ).view(targets.shape)
+
+            for b in range(tokens.shape[0]):
+                row = tokens[b].to(torch.uint8).cpu().numpy().tobytes()
+                hits = induction_positions(
+                    row, min_match=min_match, reach=reach,
+                    alphabet=alphabet, reference=reference,
+                )
+                marked = set()
+                for t, d, is_novel in hits:
+                    marked.add(t)
+                    if is_novel:
+                        novel.append(float(nll[b, t]))
+                        novel_d.append(d)
+                    else:
+                        common.append(float(nll[b, t]))
+                other += [float(nll[b, t]) for t in range(tokens.shape[1])
+                          if t not in marked]
+    finally:
+        model.train(was_training)
+
+    def bpb(vals) -> float:
+        if not vals:
+            return float("nan")
+        return bits_per_byte(sum(vals) / len(vals), n_tokens=1, n_bytes=1)
+
+    by_distance = []
+    for lo, hi in zip(buckets, buckets[1:]):
+        vals = [v for v, d in zip(novel, novel_d) if lo <= d < hi]
+        by_distance.append({"lo": lo, "hi": hi, "n": len(vals), "bpb": bpb(vals)})
+
+    total = len(novel) + len(common) + len(other)
+    return {
+        "induction_novel": bpb(novel),
+        "induction_common": bpb(common),
+        "other": bpb(other),
+        "all": bpb(novel + common + other),
+        "n_novel": len(novel), "n_common": len(common), "n_other": len(other),
+        "novel_fraction": len(novel) / total if total else 0.0,
+        "by_distance": by_distance,
+        "min_match": min_match, "reach": reach,
         "n_sequences": n_batches * batch_size,
     }
