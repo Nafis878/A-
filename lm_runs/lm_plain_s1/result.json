@@ -1,0 +1,146 @@
+{
+  "name": "lm_plain_s1",
+  "arm": "plain",
+  "seed": 1,
+  "corpus": "text8",
+  "vocab_size": 27,
+  "n_params": 459524,
+  "final_ce": 1.3963708877563477,
+  "bpb_live": 1.8995757240212086,
+  "bpb_dead": 3.4613307424668265,
+  "benefit": 1.561754846462967,
+  "by_position": [
+    {
+      "lo": 0,
+      "hi": 8,
+      "live": 2.3907136313788167,
+      "dead": 3.417298368331723,
+      "benefit": 1.026584822944232
+    },
+    {
+      "lo": 8,
+      "hi": 16,
+      "live": 1.7703039326042733,
+      "dead": 3.426470203102237,
+      "benefit": 1.6561662704979634
+    },
+    {
+      "lo": 16,
+      "hi": 32,
+      "live": 1.85945113967901,
+      "dead": 3.468453919900262,
+      "benefit": 1.6090029522039029
+    },
+    {
+      "lo": 32,
+      "hi": 64,
+      "live": 1.875647777806666,
+      "dead": 3.435757954179432,
+      "benefit": 1.560110004390115
+    },
+    {
+      "lo": 64,
+      "hi": 128,
+      "live": 1.8408476043525293,
+      "dead": 3.4625755528937714,
+      "benefit": 1.6217277765585911
+    },
+    {
+      "lo": 128,
+      "hi": 256,
+      "live": 1.9173208939372333,
+      "dead": 3.4711416647679463,
+      "benefit": 1.5538211147960146
+    }
+  ],
+  "rho": 0.271513765056928,
+  "ablation": 6.192049980163574,
+  "g_rec": 0.8332278728485107,
+  "verdict": "chain live",
+  "spread": 0.07654702663421631,
+  "secs": 2143.1107902526855,
+  "config": {
+    "model": {
+      "kind": "maglev",
+      "d_model": 128,
+      "n_layers": 2,
+      "n_heads": 4,
+      "n_kv_heads": 2,
+      "ffn_mult": 2.6667,
+      "vocab_size": 27,
+      "max_seq_len": 256,
+      "window": 4,
+      "prefiller_pattern": "SL",
+      "decoder_pattern": "SS",
+      "sharing": "shared",
+      "rope": true,
+      "rope_theta": 10000.0,
+      "norm_eps": 1e-06,
+      "logit_cap": 15.0,
+      "tie_embeddings": true,
+      "attn_impl": "sdpa",
+      "memory_residual": false,
+      "memory_gate_bias": 2.0
+    },
+    "data": {
+      "kind": "lm",
+      "seq_len": 256,
+      "task": "needle",
+      "distances": [
+        8,
+        16,
+        32,
+        48,
+        64,
+        96,
+        128,
+        192,
+        256,
+        384
+      ],
+      "n_keys": 16,
+      "n_values": 16,
+      "n_filler": 16,
+      "n_distractors": 4,
+      "loss_on_answer_only": false,
+      "shard_dir": "lm_data",
+      "tokenizer_path": null,
+      "val_tokens": 1000000
+    },
+    "loss": {
+      "lam": 0.0,
+      "consistency": "none",
+      "detach_target": false,
+      "propagation_weight": 0.0,
+      "propagation_target": 1.0
+    },
+    "optim": {
+      "lr": 0.003,
+      "betas": [
+        0.9,
+        0.95
+      ],
+      "weight_decay": 0.1,
+      "warmup": 100,
+      "schedule": "cosine",
+      "grad_clip": 1.0,
+      "total_steps": 1500,
+      "global_tokens_per_step": 4096,
+      "micro_batch": 16,
+      "precision": "auto",
+      "compile": false,
+      "train_mode": "bptt"
+    },
+    "run": {
+      "name": "lm_plain_s1",
+      "seed": 1,
+      "out_dir": "lm_runs",
+      "drive_dir": null,
+      "ckpt_every": 100,
+      "log_every": 500,
+      "eval_every": 500,
+      "heartbeat_secs": 60,
+      "wandb": false
+    }
+  }
+}
