@@ -46,3 +46,5 @@ carry.log
 !/depth_runs/*/
 /depth_runs/*/*
 !/depth_runs/*/result.json
+
+*.log
