@@ -1,0 +1,117 @@
+{
+  "name": "hop16_plain_s3",
+  "variant": "hop16",
+  "arm": "plain",
+  "seed": 3,
+  "task": "two_hop",
+  "n_layers": 2,
+  "local_reach": 6,
+  "n_params": 459524,
+  "final_ce": 0.6034430861473083,
+  "deployed": {
+    "8": {
+      "acc": 0.9921875,
+      "nll": 0.07338913786952617,
+      "n": 128
+    },
+    "12": {
+      "acc": 0.8515625,
+      "nll": 0.3085079966185731,
+      "n": 128
+    },
+    "16": {
+      "acc": 0.796875,
+      "nll": 0.4683569016124238,
+      "n": 128
+    },
+    "24": {
+      "acc": 0.65625,
+      "nll": 0.7629187972343061,
+      "n": 128
+    }
+  },
+  "rho": 0.11797465118191515,
+  "ablation": 7.383318901062012,
+  "g_rec": 0.8576810359954834,
+  "verdict": "chain live",
+  "spread": 0.05319993570446968,
+  "secs": 439.99318742752075,
+  "config": {
+    "model": {
+      "kind": "maglev",
+      "d_model": 128,
+      "n_layers": 2,
+      "n_heads": 4,
+      "n_kv_heads": 2,
+      "ffn_mult": 2.6667,
+      "vocab_size": 64,
+      "max_seq_len": 48,
+      "window": 4,
+      "prefiller_pattern": "SL",
+      "decoder_pattern": "SS",
+      "sharing": "shared",
+      "rope": true,
+      "rope_theta": 10000.0,
+      "norm_eps": 1e-06,
+      "logit_cap": 15.0,
+      "tie_embeddings": true,
+      "attn_impl": "sdpa",
+      "memory_residual": false,
+      "memory_gate_bias": 2.0
+    },
+    "data": {
+      "kind": "synthetic",
+      "seq_len": 48,
+      "task": "two_hop",
+      "distances": [
+        8,
+        12,
+        16,
+        24
+      ],
+      "n_keys": 16,
+      "n_values": 16,
+      "n_filler": 16,
+      "n_distractors": 2,
+      "loss_on_answer_only": true,
+      "shard_dir": null,
+      "tokenizer_path": null,
+      "val_tokens": 2000000
+    },
+    "loss": {
+      "lam": 0.0,
+      "consistency": "none",
+      "detach_target": false,
+      "propagation_weight": 0.0,
+      "propagation_target": 1.0
+    },
+    "optim": {
+      "lr": 0.003,
+      "betas": [
+        0.9,
+        0.95
+      ],
+      "weight_decay": 0.1,
+      "warmup": 100,
+      "schedule": "cosine",
+      "grad_clip": 1.0,
+      "total_steps": 1500,
+      "global_tokens_per_step": 1536,
+      "micro_batch": 32,
+      "precision": "auto",
+      "compile": false,
+      "train_mode": "bptt"
+    },
+    "run": {
+      "name": "hop16_plain_s3",
+      "seed": 3,
+      "out_dir": "breadth_runs",
+      "drive_dir": null,
+      "ckpt_every": 100,
+      "log_every": 500,
+      "eval_every": 500,
+      "heartbeat_secs": 60,
+      "wandb": false
+    }
+  }
+}
