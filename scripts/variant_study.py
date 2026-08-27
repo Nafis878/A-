@@ -129,12 +129,29 @@ def cells(study: str) -> List[Dict[str, Any]]:
     return out
 
 
-def check_reach(cfg) -> None:
-    """Every probe distance must exceed the stacked local reach.
+def check_reach(cfg, n_batches: int = 40, batch_size: int = 32,
+                tolerance: float = 0.10) -> None:
+    """The ANSWER must lie outside the stacked local reach, verified on data.
 
-    SyntheticGenerator enforces this for delayed_recall only. `needle` and
-    `two_hop` get no such check, so without this a "memory" result could be
-    solvable by local attention alone and nobody would notice.
+    Checking `data.distances` against the reach is not enough, and assuming it
+    was cost a wasted study. `two_hop` plants `[A,B] .. [B,C] .. [QUERY,A,C]`
+    and reports the FAR hop as the distance, while sampling the near hop from
+    `randint(2, d1-1)`. The near hop carries C -- the answer itself -- so with
+    reach 6 and distances [8,12,16,24], 60.9% of instances have the answer
+    sitting inside the window (100% of them at d1=8). Both arms then score ~0.85
+    by reading it locally, and the resulting null says nothing about memory.
+
+    So this samples real batches and locates the answer token, rather than
+    trusting the distance grid. Catches any task whose construction leaks the
+    answer into the window, including ones added later.
+
+    The tolerance sits at 10% because a COINCIDENCE floor exists and is not a
+    leak: with 16 values a distractor's value equals the needle's about 1 time in
+    16, so delayed_recall and needle both measure ~2.2% even though nothing is
+    locally derivable -- the model cannot tell which matching token is the
+    answer. Structural leakage looks completely different: two_hop measures
+    58.4%. Anything between those is worth investigating by hand rather than
+    thresholding.
     """
     reach = cfg.model.local_reach
     bad = [d for d in cfg.data.distances if d <= reach]
@@ -142,6 +159,27 @@ def check_reach(cfg) -> None:
         raise SystemExit(
             f"distances {bad} are within stacked local reach L*(W-1)={reach} "
             f"for task {cfg.data.task!r}: the task would not require memory"
+        )
+
+    gen = SyntheticGenerator(cfg.data, cfg.model, seed=0)
+    q = gen.query_pos
+    leaked = total = 0
+    for step in range(n_batches):
+        b = gen.batch(step, batch_size)
+        for i in range(batch_size):
+            gold = int(b.targets[i, b.answer_idx[i]])
+            seen = [t for t in range(q) if int(b.tokens[i, t]) == gold]
+            if not seen:
+                continue
+            total += 1
+            leaked += (q - max(seen)) <= reach
+    if total and leaked / total > tolerance:
+        raise SystemExit(
+            f"task {cfg.data.task!r}: the answer token lies within the local "
+            f"reach of {reach} in {leaked / total:.1%} of sampled instances "
+            f"(tolerance {tolerance:.0%}). It is solvable without memory, so a "
+            f"null result here would be uninformative. Fix the generator before "
+            f"using this task as evidence."
         )
 
 
