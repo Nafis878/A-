@@ -1,0 +1,529 @@
+<title>The Write Rule Needs a Latch</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Serif:ital,wght@0,400;0,600;1,400&display=swap">
+
+<style>
+  :root {
+    --paper:      #F7F8F7;
+    --raised:     #FFFFFF;
+    --ink:        #14181A;
+    --ink-soft:   #4A5457;
+    --ink-faint:  #788487;
+    --rule:       #DCE1DF;
+    --rule-firm:  #B9C2BF;
+    --signal:     #0E6E78;   /* identity path: channel open */
+    --signal-bg:  #E2F0F1;
+    --decay:      #9E4E1C;   /* write rule: channel decayed */
+    --decay-bg:   #F6E9DF;
+    --null:       #5B5F70;
+    --null-bg:    #E9EAEE;
+    --measure: 68ch;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --paper:     #101414;
+      --raised:    #171C1C;
+      --ink:       #E7ECEA;
+      --ink-soft:  #A3AEAC;
+      --ink-faint: #76817F;
+      --rule:      #262D2D;
+      --rule-firm: #3A4342;
+      --signal:    #4CBAC4;
+      --signal-bg: #10312F;
+      --decay:     #DB9257;
+      --decay-bg:  #331F12;
+      --null:      #9BA0B2;
+      --null-bg:   #21242C;
+    }
+  }
+  :root[data-theme="dark"] {
+    --paper:     #101414;
+    --raised:    #171C1C;
+    --ink:       #E7ECEA;
+    --ink-soft:  #A3AEAC;
+    --ink-faint: #76817F;
+    --rule:      #262D2D;
+    --rule-firm: #3A4342;
+    --signal:    #4CBAC4;
+    --signal-bg: #10312F;
+    --decay:     #DB9257;
+    --decay-bg:  #331F12;
+    --null:      #9BA0B2;
+    --null-bg:   #21242C;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--paper);
+    color: var(--ink);
+    font-family: "IBM Plex Sans", system-ui, -apple-system, sans-serif;
+    font-size: 16.5px;
+    line-height: 1.62;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 1040px; margin: 0 auto; padding: 0 28px 120px; }
+  .col  { max-width: var(--measure); }
+
+  h1, h2, h3 { font-family: "IBM Plex Serif", Georgia, serif; text-wrap: balance; }
+  h1 { font-size: clamp(2.1rem, 4.6vw, 3.05rem); line-height: 1.12; font-weight: 600;
+       letter-spacing: -0.018em; margin: 0 0 .5rem; }
+  h2 { font-size: 1.52rem; font-weight: 600; letter-spacing: -0.01em;
+       margin: 0 0 .2rem; }
+  h3 { font-size: 1.06rem; font-weight: 600; margin: 0 0 .35rem; }
+  p  { margin: 0 0 1.05rem; }
+  a  { color: var(--signal); }
+  strong { font-weight: 600; }
+
+  .eyebrow {
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: .72rem; letter-spacing: .14em; text-transform: uppercase;
+    color: var(--ink-faint); margin: 0 0 1.1rem;
+  }
+
+  /* ---- masthead ---- */
+  header.top { padding: 76px 0 0; }
+  .thesis {
+    font-family: "IBM Plex Serif", Georgia, serif;
+    font-size: 1.24rem; line-height: 1.5; color: var(--ink-soft);
+    max-width: 60ch; margin: 0 0 2.4rem;
+  }
+  .headline {
+    display: grid; gap: 0;
+    grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+    border-top: 2px solid var(--ink); border-bottom: 1px solid var(--rule-firm);
+  }
+  .headline div { padding: 18px 20px 20px; border-right: 1px solid var(--rule); }
+  .headline div:last-child { border-right: 0; }
+  .headline .k {
+    font-family: "IBM Plex Mono", monospace; font-size: .68rem;
+    letter-spacing: .11em; text-transform: uppercase; color: var(--ink-faint);
+    display: block; margin-bottom: .45rem;
+  }
+  .headline .v {
+    font-family: "IBM Plex Mono", monospace; font-size: 1.5rem; font-weight: 500;
+    font-variant-numeric: tabular-nums; letter-spacing: -0.02em; display: block;
+  }
+  .headline .n { font-size: .8rem; color: var(--ink-soft); display: block; margin-top: .2rem; }
+
+  /* ---- findings ---- */
+  section { margin: 62px 0 0; }
+  .fhead { display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap;
+           margin-bottom: .9rem; }
+  .chip {
+    font-family: "IBM Plex Mono", monospace; font-size: .66rem; font-weight: 600;
+    letter-spacing: .1em; text-transform: uppercase;
+    padding: 3px 9px 4px; border-radius: 2px; white-space: nowrap;
+  }
+  .chip.holds  { background: var(--signal-bg); color: var(--signal);
+                 box-shadow: inset 0 0 0 1px var(--signal); }
+  .chip.nul    { background: var(--null-bg); color: var(--null);
+                 box-shadow: inset 0 0 0 1px var(--null); }
+  .chip.void   { background: var(--decay-bg); color: var(--decay);
+                 box-shadow: inset 0 0 0 1px var(--decay); }
+
+  /* ---- data ---- */
+  .scroll { overflow-x: auto; margin: 1.4rem 0 1.6rem; }
+  table { border-collapse: collapse; width: 100%; min-width: 520px;
+          font-family: "IBM Plex Mono", monospace; font-size: .86rem;
+          font-variant-numeric: tabular-nums; }
+  caption { caption-side: bottom; text-align: left; padding-top: .7rem;
+            font-family: "IBM Plex Sans", sans-serif; font-size: .84rem;
+            color: var(--ink-soft); line-height: 1.5; }
+  th, td { padding: 8px 14px; text-align: right; border-bottom: 1px solid var(--rule); }
+  th:first-child, td:first-child { text-align: left; }
+  thead th {
+    font-size: .68rem; letter-spacing: .08em; text-transform: uppercase;
+    color: var(--ink-faint); font-weight: 500;
+    border-bottom: 1px solid var(--rule-firm);
+  }
+  tbody tr:last-child td { border-bottom: 1px solid var(--rule-firm); }
+  td.sig  { color: var(--signal); }
+  td.dec  { color: var(--decay); }
+  tr.total td { font-weight: 600; border-bottom: 2px solid var(--ink); }
+
+  figure { margin: 1.8rem 0; }
+  figcaption { font-size: .84rem; color: var(--ink-soft); margin-top: .7rem;
+               max-width: 62ch; line-height: 1.5; }
+  svg { display: block; max-width: 100%; height: auto; }
+
+  .note {
+    border-left: 2px solid var(--rule-firm); padding: 2px 0 2px 18px;
+    color: var(--ink-soft); margin: 1.4rem 0; max-width: 62ch;
+  }
+  .note.warn { border-left-color: var(--decay); }
+
+  ul.plain { margin: 0 0 1.1rem; padding-left: 1.15rem; }
+  ul.plain li { margin-bottom: .48rem; }
+
+  code { font-family: "IBM Plex Mono", monospace; font-size: .88em;
+         background: var(--raised); padding: 1px 5px; border-radius: 2px;
+         box-shadow: inset 0 0 0 1px var(--rule); }
+  pre { font-family: "IBM Plex Mono", monospace; font-size: .82rem;
+        background: var(--raised); border: 1px solid var(--rule);
+        border-radius: 3px; padding: 14px 16px; overflow-x: auto; line-height: 1.55; }
+  pre code { background: none; box-shadow: none; padding: 0; }
+
+  hr.div { border: 0; border-top: 1px solid var(--rule); margin: 58px 0 0; }
+
+  footer { margin-top: 68px; padding-top: 24px; border-top: 2px solid var(--ink);
+           font-size: .88rem; color: var(--ink-soft); }
+
+  @media (max-width: 620px) {
+    .headline div { border-right: 0; border-bottom: 1px solid var(--rule); }
+    body { font-size: 16px; }
+  }
+</style>
+
+<div class="wrap">
+
+<header class="top">
+  <p class="eyebrow">Bounded-memory transformers &middot; recurrent K/V injection</p>
+  <h1>The write rule needs a latch</h1>
+  <p class="thesis">
+    Maglev rebuilds its memory state from scratch at every step. To remember anything,
+    the model must first discover a saturated attractor &mdash; and usually doesn&rsquo;t.
+    Adding a one-line identity path removes that requirement and the failure disappears.
+    In synthetic retrieval this is decisive. In language modelling it is absent, and that
+    null is reported here as prominently as the positive result.
+  </p>
+
+  <div class="headline">
+    <div>
+      <span class="k">Write rule</span>
+      <span class="v" style="color:var(--decay)">11 / 35</span>
+      <span class="n">seeds solve the task</span>
+    </div>
+    <div>
+      <span class="k">+ identity path</span>
+      <span class="v" style="color:var(--signal)">35 / 35</span>
+      <span class="n">across a 55&times; parameter range</span>
+    </div>
+    <div>
+      <span class="k">Stratified exact</span>
+      <span class="v">8.8e&minus;11</span>
+      <span class="n">conditioned on each rung</span>
+    </div>
+    <div>
+      <span class="k">Language modelling</span>
+      <span class="v" style="color:var(--null)">null</span>
+      <span class="n">write rule wins, 0 / 5 seeds</span>
+    </div>
+  </div>
+</header>
+
+<section class="col">
+  <h2>What is being tested</h2>
+  <p>
+    Maglev&rsquo;s decoder carries a memory vector between steps and writes it as
+    <code>m_t = decoder_norm(h_t)</code> &mdash; a fresh function of the current hidden state,
+    with no path from <code>m_{t&minus;1}</code> to <code>m_t</code> except through the network.
+    Retaining a fact therefore requires learning the identity function through a
+    normalisation layer.
+  </p>
+  <p>
+    The probe is delayed recall: a key&ndash;value pair is planted, filler follows, then the key
+    is queried. With window <code>W</code> and <code>L</code> layers the decoder&rsquo;s stacked local
+    reach is <code>L&middot;(W&minus;1)</code>, so every probe distance is placed beyond it and no
+    instance is answerable without memory. Training runs through the recurrence (BPTT), so the
+    path being evaluated is the path being optimised.
+  </p>
+  <p>
+    The intervention is one line &mdash; <code>m_t = f&middot;m_{t&minus;1} + (1&minus;f)&middot;decoder_norm(h_t)</code>
+    with a learned gate. It is a standard forget gate, and the contribution here is the
+    diagnosis, not the cure.
+  </p>
+</section>
+
+<hr class="div">
+
+<section>
+  <div class="fhead col">
+    <h2>Scale</h2><span class="chip holds">Holds</span>
+  </div>
+  <p class="col">
+    The obvious objection to a two-layer result is that it is an artefact of a two-layer model.
+    Width was scaled 55&times; with the task held <em>literally</em> fixed &mdash; same sequence
+    length, same distances, same reach, same sampled batches &mdash; so parameter count is the
+    only variable that moves.
+  </p>
+
+  <figure>
+    <svg viewBox="0 0 680 300" role="img" aria-label="Success rate against parameter count. The identity path stays at 100% across all five rungs. The write rule rises to 60% at 1.7M then falls to zero at 15.6M and 27.4M.">
+      <g font-family="IBM Plex Mono, monospace" font-size="11" fill="var(--ink-faint)">
+        <text x="52" y="34" text-anchor="end">100%</text>
+        <text x="52" y="145" text-anchor="end">50%</text>
+        <text x="52" y="254" text-anchor="end">0%</text>
+      </g>
+      <g stroke="var(--rule)" stroke-width="1">
+        <line x1="60" y1="30" x2="640" y2="30"></line>
+        <line x1="60" y1="140" x2="640" y2="140"></line>
+      </g>
+      <line x1="60" y1="250" x2="640" y2="250" stroke="var(--rule-firm)" stroke-width="1"></line>
+
+      <polyline points="60,30 237,30 441,30 559,30 640,30"
+                fill="none" stroke="var(--signal)" stroke-width="2.5"></polyline>
+      <polyline points="60,184 237,118 441,162 559,250 640,250"
+                fill="none" stroke="var(--decay)" stroke-width="2.5"
+                stroke-dasharray="0"></polyline>
+
+      <g fill="var(--signal)">
+        <circle cx="60" cy="30" r="4.5"></circle><circle cx="237" cy="30" r="4.5"></circle>
+        <circle cx="441" cy="30" r="4.5"></circle><circle cx="559" cy="30" r="4.5"></circle>
+        <circle cx="640" cy="30" r="4.5"></circle>
+      </g>
+      <g fill="var(--decay)">
+        <circle cx="60" cy="184" r="4.5"></circle><circle cx="237" cy="118" r="4.5"></circle>
+        <circle cx="441" cy="162" r="4.5"></circle><circle cx="559" cy="250" r="4.5"></circle>
+        <circle cx="640" cy="250" r="4.5"></circle>
+      </g>
+
+      <g font-family="IBM Plex Mono, monospace" font-size="11" fill="var(--ink-faint)" text-anchor="middle">
+        <text x="60"  y="272">0.5M</text><text x="237" y="272">1.7M</text>
+        <text x="441" y="272">6.9M</text><text x="559" y="272">15.6M</text>
+        <text x="640" y="272">27.4M</text>
+      </g>
+      <g font-family="IBM Plex Sans, sans-serif" font-size="12">
+        <text x="60" y="292" fill="var(--ink-faint)">non-embedding parameters (log scale)</text>
+        <text x="248" y="24" fill="var(--signal)" font-weight="600">identity path</text>
+        <text x="452" y="152" fill="var(--decay)" font-weight="600">Maglev write rule</text>
+      </g>
+    </svg>
+    <figcaption>
+      The write rule does not merely stay bad with scale &mdash; it gets worse. Its success rate
+      peaks at 1.7M and reaches zero at both of the two largest rungs.
+    </figcaption>
+  </figure>
+
+  <div class="scroll">
+    <table>
+      <thead>
+        <tr><th>Rung</th><th>Non-emb.</th><th>Write rule</th><th>+ identity</th><th>Fisher p</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>d = 128</td><td>0.5M</td><td class="dec">3 / 10</td><td class="sig">10 / 10</td><td>1.6e&minus;03</td></tr>
+        <tr><td>d = 256</td><td>1.7M</td><td class="dec">6 / 10</td><td class="sig">10 / 10</td><td>4.3e&minus;02</td></tr>
+        <tr><td>d = 512</td><td>6.9M</td><td class="dec">2 / 5</td><td class="sig">5 / 5</td><td>8.3e&minus;02</td></tr>
+        <tr><td>d = 768</td><td>15.6M</td><td class="dec">0 / 5</td><td class="sig">5 / 5</td><td>4.0e&minus;03</td></tr>
+        <tr><td>d = 1024</td><td>27.4M</td><td class="dec">0 / 5</td><td class="sig">5 / 5</td><td>4.0e&minus;03</td></tr>
+        <tr class="total"><td>Stratified</td><td>&mdash;</td><td class="dec">11 / 35</td><td class="sig">35 / 35</td><td>8.8e&minus;11</td></tr>
+      </tbody>
+      <caption>
+        70 cells, 28.4 CPU-hours. The rungs are different conditions, not repeats of one, so
+        they are combined with an exact conditional test that conditions on each rung&rsquo;s own
+        margins. Pooling them into a single 2&times;2 would assume exchangeability and report a
+        smaller p than the data support.
+      </caption>
+    </table>
+  </div>
+</section>
+
+<hr class="div">
+
+<section>
+  <div class="fhead col">
+    <h2>Task breadth</h2><span class="chip holds">Holds</span>
+  </div>
+  <p class="col">
+    The ladder uses two candidate values, so chance is 0.5 and a coin flip carries the readout.
+    Repeating at 16 values with distractors drops chance to 0.0625 and makes the outcome graded
+    rather than bimodal.
+  </p>
+
+  <div class="scroll">
+    <table>
+      <thead>
+        <tr><th>Task</th><th>Write rule</th><th>+ identity</th><th>Ratio</th><th>Paired p</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>Delayed recall</td><td class="dec">0.142</td><td class="sig">0.912</td><td>6.4&times;</td><td>0.031</td></tr>
+        <tr><td>Needle</td><td class="dec">0.142</td><td class="sig">0.912</td><td>6.4&times;</td><td>0.031</td></tr>
+        <tr><td>Two-hop</td><td colspan="4" style="text-align:left;color:var(--decay)">excluded &mdash; task invalid, see below</td></tr>
+      </tbody>
+      <caption>
+        Deployed accuracy against a chance floor of 0.0625, paired by seed. p = 0.031 is 1/2<sup>5</sup>,
+        the floor for five seeds: every seed favours the identity path.
+      </caption>
+    </table>
+  </div>
+
+  <div class="note warn col">
+    <p style="margin:0"><strong>Two-hop was excluded, not reported as a null.</strong>
+    It plants <code>[A,B] &hellip; [B,C] &hellip; [QUERY,A,C]</code> and reports the far hop as
+    the distance, while sampling the near hop &mdash; which carries the answer <code>C</code> &mdash;
+    from <code>randint(2, d&minus;1)</code>. Measured: <strong>60.9%</strong> of instances place the
+    answer inside the local window, 100% of them at the shortest distance. Both arms scored ~0.85
+    by reading it locally. The validity check now samples real batches and locates the answer token
+    rather than trusting the distance grid.</p>
+  </div>
+</section>
+
+<hr class="div">
+
+<section>
+  <div class="fhead col">
+    <h2>Mechanism: latch versus maintenance</h2><span class="chip holds">Holds</span>
+  </div>
+  <p class="col">
+    A contradiction in our own output forced this. One write-rule cell solves distance 24 at
+    accuracy 1.000 while recording a one-step gain of &rho; = 0.093. Compounded over 24 steps
+    that is 10<sup>&minus;20</sup>. Three explanations were tested; the first two are wrong and
+    are kept because the third is only credible against them.
+  </p>
+
+  <div class="scroll">
+    <table>
+      <thead>
+        <tr><th>Cell</th><th>&rho; (1 step)</th><th>&rho;<sup>24</sup> predicts</th><th>Measured</th><th>Task signal at query</th><th>Logit margin</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>Write rule, solves</td><td class="dec">0.150</td><td>1.7e&minus;20</td><td>2.0e&minus;07</td><td class="sig">1.434</td><td class="sig">13.71</td></tr>
+        <tr><td>Write rule, fails</td><td class="dec">0.005</td><td>5.8e&minus;56</td><td>3.9e&minus;14</td><td class="dec">0.000</td><td class="dec">&minus;0.01</td></tr>
+        <tr><td>Identity path</td><td class="sig">0.991</td><td>8.1e&minus;01</td><td>5.9e&minus;01</td><td class="sig">0.771</td><td class="sig">17.99</td></tr>
+      </tbody>
+      <caption>
+        Task signal is the separation between two memory trajectories differing only in the planted
+        value, relative to memory scale. For the identity path, &rho;<sup>24</sup> predicts the
+        closed-loop sensitivity within 27% &mdash; that channel really is linear. For the write rule
+        it is wrong by 13 to 41 orders of magnitude.
+      </caption>
+    </table>
+  </div>
+
+  <p class="col">
+    The successful write-rule cell carries the answer <em>perfectly</em> &mdash; the two trajectories
+    separate at the needle and are still 1.43 apart at the query, worth a 13.7 logit margin &mdash;
+    while its Jacobian reads 2&times;10<sup>&minus;7</sup>. It has learned a <strong>latch</strong>:
+    a saturated attractor, invisible to any linearisation, because perturbations decay back into the
+    basin they came from. The identity path instead has a <strong>linear maintenance channel</strong>,
+    &rho; &asymp; 1 at every position.
+  </p>
+  <p class="col">
+    That is the mechanism behind the scale trend. A latch is a brittle thing for gradient descent to
+    find, and evidently harder to stumble into as width grows &mdash; not easier.
+  </p>
+  <div class="note col">
+    <p style="margin:0">Consequence for anyone reading &rho; elsewhere in this work: it measures
+    whether a channel is <em>linear and maintained</em>. It must never be compounded over distance,
+    and a severed write should be confirmed against the task signal, not &rho; alone.</p>
+  </div>
+</section>
+
+<hr class="div">
+
+<section>
+  <div class="fhead col">
+    <h2>Language modelling</h2><span class="chip nul">Null &mdash; effect absent</span>
+  </div>
+  <p class="col">
+    Character-level text8, same geometry as the ladder&rsquo;s base rung. Aggregate bits-per-byte
+    shows no defect: the write rule&rsquo;s channel is alive (&rho; = 0.27&ndash;0.43, against ~0.002 in a
+    failed synthetic cell), memory buys it 1.52 bits, and it is the <em>better</em> language model.
+  </p>
+  <p class="col">
+    Aggregate BPB cannot test the hypothesis, though, and that is measurable rather than arguable:
+    only <strong>0.57%</strong> of held-out positions are ones where the next character is fixed by a
+    substring absent from training that last occurred a median of 72 characters back. So those
+    positions were measured directly, with the prediction written down first &mdash; the write rule
+    should lose there, and lose by more with distance.
+  </p>
+
+  <div class="scroll">
+    <table>
+      <thead>
+        <tr><th>Arm</th><th>Novel induction</th><th>Common induction</th><th>Other</th><th>All</th><th>Seeds won</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>Write rule</td><td class="sig">2.4996</td><td class="sig">1.7184</td><td class="sig">1.9227</td><td class="sig">1.9174</td><td>&mdash;</td></tr>
+        <tr><td>+ identity path</td><td class="dec">2.6025</td><td class="dec">1.7666</td><td class="dec">1.9846</td><td class="dec">1.9789</td><td class="dec">0 / 5</td></tr>
+        <tr><td>+ identity, gate bias 0</td><td class="dec">2.5731</td><td class="dec">1.7457</td><td class="dec">1.9609</td><td class="dec">1.9553</td><td class="dec">0 / 5</td></tr>
+      </tbody>
+      <caption>
+        Bits per byte, lower is better. The write rule wins on every group, at every retrieval
+        distance, on every seed. The gate-bias variant tested whether the deficit was a bad prior
+        rather than the mechanism &mdash; it helps and does not close the gap.
+      </caption>
+    </table>
+  </div>
+
+  <p class="col">
+    <strong>The prediction is refuted.</strong> The write-rule failure does not appear in
+    character-level language modelling, not even at the positions constructed to expose it, and the
+    intervention costs LM quality. A coherent reading is that text never demands what the synthetic
+    probe demands &mdash; exact recall of an arbitrary, non-redundant token &mdash; so a partially
+    decaying channel suffices. That reading is consistent with the data but is not itself tested here.
+  </p>
+</section>
+
+<hr class="div">
+
+<section class="col">
+  <h2>Errors found and corrected</h2>
+  <p>
+    Each of these changed a number that would otherwise have been published. They are listed because
+    a reviewer should be able to see what the validity checks caught.
+  </p>
+  <ul class="plain">
+    <li><strong>Fisher test returned exactly zero.</strong> The hypergeometric tail summed from the
+      wrong lower bound, giving an empty range whenever one arm is perfect &mdash; precisely the
+      10/10 vs 3/10 table the headline rests on. Now checked against SciPy on seven tables.</li>
+    <li><strong>Arms assembled by run name dropped three seeds.</strong> The ten seeds per arm came
+      from three scripts under unrelated names; name matching reported 2/7 vs 8/8 instead of
+      3/10 vs 10/10. Arms are now selected by config.</li>
+    <li><strong>A binary success criterion hid a 6.4&times; gap.</strong> Built for the bimodal
+      2-value task, it counted a 0.143 cell as &ldquo;learned&rdquo; beside a 0.906 one and reported
+      the 16-value result as p = 0.50.</li>
+    <li><strong>The first LM metric was confounded.</strong> Bits bought by memory rewards a worse
+      local baseline, so the identity path&rsquo;s apparent advantage came from its ablated model
+      being worse, not its deployed model being better.</li>
+    <li><strong>Two-hop leaked the answer</strong> into the local window in 60.9% of instances.</li>
+  </ul>
+</section>
+
+<hr class="div">
+
+<section class="col">
+  <h2>Limitations</h2>
+  <ul class="plain">
+    <li><strong>No language-model claim is supported.</strong> The effect is absent under a
+      measurement built to detect it, and the intervention degrades LM quality on every seed.</li>
+    <li><strong>Depth is not scaled.</strong> Every rung is two layers &mdash; which is what keeps
+      the task comparable, since reach is <code>L&middot;(W&minus;1)</code> &mdash; so the ladder
+      isolates parameter count and leaves depth untested.</li>
+    <li><strong>Maglev&rsquo;s published result is not reproduced.</strong> The defect is shown in a
+      reimplementation of its write rule, not in its reported setting.</li>
+    <li><strong>The intervention is a standard forget gate.</strong> The contribution is the
+      diagnosis &mdash; that the write rule forces the model to discover a latch &mdash; not the fix.</li>
+    <li><strong>One task family, one probe design.</strong> Delayed recall and needle share a
+      planting routine; two-hop was excluded as invalid.</li>
+  </ul>
+</section>
+
+<hr class="div">
+
+<section class="col">
+  <h2>Reproducing this</h2>
+  <p>
+    Every number above is recomputed from archived JSON that embeds its own full configuration. No
+    checkpoint, scratch directory or GPU is required.
+  </p>
+  <pre><code>python evidence/verify.py        # recompute every headline from the archive
+pytest tests/ -q                 # 179 tests, including regression locks on the
+                                 # headline, the stratified statistic and the
+                                 # bit-exact resume path</code></pre>
+  <p>
+    129 result files are tracked in the repository. Checkpoints are deliberately not archived
+    &mdash; roughly 51&nbsp;MB per cell against 2.5&nbsp;KB of JSON, and nothing here needs them.
+  </p>
+</section>
+
+<footer class="col">
+  <p style="margin:0">
+    All statistics are exact conditional or exact permutation tests; no normal approximations are
+    used. Where a test&rsquo;s smallest attainable p-value is bounded by the number of seeds, that
+    floor is reported alongside it.
+  </p>
+</footer>
+
+</div>
