@@ -1,0 +1,137 @@
+{
+  "name": "res_b0_s4",
+  "arm": "res_b0",
+  "seed": 4,
+  "final_ce": 1.2810591459274292,
+  "bpb_novel": 2.53703564005808,
+  "bpb_common": 1.7376302363178815,
+  "bpb_other": 1.9632946543279477,
+  "bpb_all": 1.9570475901569149,
+  "n_novel": 2345,
+  "n_common": 17301,
+  "n_other": 389954,
+  "novel_fraction": 0.00572509765625,
+  "by_distance": [
+    {
+      "lo": 7,
+      "hi": 16,
+      "n": 129,
+      "bpb": 3.5588213038022785
+    },
+    {
+      "lo": 16,
+      "hi": 32,
+      "n": 411,
+      "bpb": 2.839644318235789
+    },
+    {
+      "lo": 32,
+      "hi": 64,
+      "n": 667,
+      "bpb": 2.3706956223685935
+    },
+    {
+      "lo": 64,
+      "hi": 128,
+      "n": 708,
+      "bpb": 2.4094664103891743
+    },
+    {
+      "lo": 128,
+      "hi": 256,
+      "n": 430,
+      "bpb": 2.4093270099428072
+    }
+  ],
+  "reach": 6,
+  "min_match": 8,
+  "bpb_live": 1.9458301140054592,
+  "bpb_dead": 3.513554994227827,
+  "rho": 0.9999944766362509,
+  "g_rec": 0.8990020751953125,
+  "secs": 2930.933206319809,
+  "config": {
+    "model": {
+      "kind": "maglev",
+      "d_model": 128,
+      "n_layers": 2,
+      "n_heads": 4,
+      "n_kv_heads": 2,
+      "ffn_mult": 2.6667,
+      "vocab_size": 27,
+      "max_seq_len": 256,
+      "window": 4,
+      "prefiller_pattern": "SL",
+      "decoder_pattern": "SS",
+      "sharing": "shared",
+      "rope": true,
+      "rope_theta": 10000.0,
+      "norm_eps": 1e-06,
+      "logit_cap": 15.0,
+      "tie_embeddings": true,
+      "attn_impl": "sdpa",
+      "memory_residual": true,
+      "memory_gate_bias": 0.0
+    },
+    "data": {
+      "kind": "lm",
+      "seq_len": 256,
+      "task": "needle",
+      "distances": [
+        8,
+        16,
+        32,
+        48,
+        64,
+        96,
+        128,
+        192,
+        256,
+        384
+      ],
+      "n_keys": 16,
+      "n_values": 16,
+      "n_filler": 16,
+      "n_distractors": 4,
+      "loss_on_answer_only": false,
+      "shard_dir": "lm_data",
+      "tokenizer_path": null,
+      "val_tokens": 1000000
+    },
+    "loss": {
+      "lam": 0.0,
+      "consistency": "none",
+      "detach_target": false,
+      "propagation_weight": 0.0,
+      "propagation_target": 1.0
+    },
+    "optim": {
+      "lr": 0.003,
+      "betas": [
+        0.9,
+        0.95
+      ],
+      "weight_decay": 0.1,
+      "warmup": 100,
+      "schedule": "cosine",
+      "grad_clip": 1.0,
+      "total_steps": 1500,
+      "global_tokens_per_step": 4096,
+      "micro_batch": 16,
+      "precision": "auto",
+      "compile": false,
+      "train_mode": "bptt"
+    },
+    "run": {
+      "name": "res_b0_s4",
+      "seed": 4,
+      "out_dir": "lm_ind_runs",
+      "drive_dir": null,
+      "ckpt_every": 100,
+      "log_every": 500,
+      "eval_every": 500,
+      "heartbeat_secs": 60,
+      "wandb": false
+    }
+  }
+}
